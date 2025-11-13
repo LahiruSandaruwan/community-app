@@ -64,6 +64,69 @@ dependencies:
   # Network connectivity
   connectivity_plus: ^5.0.2
 
+  # Voice & Audio
+  record: ^5.0.1
+  audioplayers: ^5.2.1
+  path_provider: ^2.1.2
+
+  # File handling
+  file_picker: ^6.1.1
+  open_file: ^3.3.2
+
+  # PDF viewer
+  syncfusion_flutter_pdfviewer: ^24.1.41
+
+  # Math equations
+  flutter_math_fork: ^0.7.1
+
+  # Code syntax highlighting
+  flutter_highlight: ^0.7.0
+
+  # Calendar
+  table_calendar: ^3.0.9
+
+  # Charts for analytics
+  fl_chart: ^0.66.0
+
+  # Animations
+  animations: ^2.0.11
+
+  # Video player (for future)
+  video_player: ^2.8.2
+
+  # Language translation
+  translator: ^1.0.0
+
+  # Barcode/QR scanner
+  mobile_scanner: ^3.5.5
+
+  # Document scanner
+  cunning_document_scanner: ^1.2.1
+
+  # HTML rendering (for rich text)
+  flutter_html: ^3.0.0-beta.2
+
+  # Markdown support
+  flutter_markdown: ^0.6.18
+
+  # Badge notifications
+  badges: ^3.1.2
+
+  # Shimmer loading effect
+  shimmer: ^3.0.0
+
+  # Pull to refresh
+  pull_to_refresh: ^2.0.0
+
+  # Slidable list items
+  flutter_slidable: ^3.0.1
+
+  # Rating/Stars
+  flutter_rating_bar: ^4.0.1
+
+  # In-app purchases (for premium)
+  in_app_purchase: ^3.1.13
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
