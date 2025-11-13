@@ -10,6 +10,7 @@ import '../../providers/chat_provider.dart';
 import '../../utils/theme.dart';
 import '../chat/chat_screen.dart';
 import 'create_group_screen.dart';
+import 'member_management_screen.dart';
 
 class CommunityDetailScreen extends StatefulWidget {
   final CommunityModel community;
@@ -147,7 +148,13 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
                 if (value == 'regenerate_code') {
                   _regenerateInviteCode();
                 } else if (value == 'manage_members') {
-                  // TODO: Implement member management
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) => MemberManagementScreen(
+                        community: widget.community,
+                      ),
+                    ),
+                  );
                 }
               },
               itemBuilder: (context) => [

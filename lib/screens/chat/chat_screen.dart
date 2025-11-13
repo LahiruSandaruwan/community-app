@@ -1,14 +1,18 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../models/group_chat_model.dart';
 import '../../models/message_model.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/chat_provider.dart';
+import '../../services/storage_service.dart';
 import '../../utils/theme.dart';
 import '../../utils/constants.dart';
 import '../../widgets/message_bubble.dart';
 import '../../widgets/typing_indicator.dart';
+import 'group_info_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   final GroupChatModel groupChat;
@@ -25,7 +29,10 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final StorageService _storageService = StorageService();
+  final ImagePicker _imagePicker = ImagePicker();
   bool _isTyping = false;
+  bool _isUploading = false;
 
   @override
   void initState() {
@@ -99,6 +106,86 @@ class _ChatScreenState extends State<ChatScreen> {
 
     // Scroll to bottom
     _scrollToBottom();
+  }
+
+  Future<void> _pickAndSendImage() async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final chatProvider = Provider.of<ChatProvider>(context, listen: false);
+
+    if (authProvider.currentUser == null) return;
+
+    // Check if user can send messages (for announcement groups)
+    if (widget.groupChat.isAnnouncementOnly &&
+        !authProvider.currentUser!.isTutor) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Only tutors can send messages in this group'),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+      return;
+    }
+
+    try {
+      // Pick image
+      final XFile? image = await _imagePicker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1920,
+        maxHeight: 1920,
+        imageQuality: 85,
+      );
+
+      if (image == null) return;
+
+      setState(() {
+        _isUploading = true;
+      });
+
+      // Upload image to Firebase Storage
+      String imageUrl = await _storageService.uploadChatImage(
+        groupChatId: widget.groupChat.id,
+        imageFile: File(image.path),
+      );
+
+      // Send message with image URL
+      bool success = await chatProvider.sendMessage(
+        groupChatId: widget.groupChat.id,
+        senderId: authProvider.currentUser!.id,
+        senderName: authProvider.currentUser!.name,
+        senderProfileUrl: authProvider.currentUser!.profilePictureUrl,
+        content: imageUrl,
+        messageType: AppConstants.messageTypeImage,
+      );
+
+      setState(() {
+        _isUploading = false;
+      });
+
+      if (!success && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to send image'),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+      }
+
+      // Scroll to bottom
+      _scrollToBottom();
+    } catch (e) {
+      setState(() {
+        _isUploading = false;
+      });
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: ${e.toString()}'),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+    }
   }
 
   void _scrollToBottom() {
@@ -300,7 +387,13 @@ class _ChatScreenState extends State<ChatScreen> {
           IconButton(
             icon: const Icon(Icons.info_outline),
             onPressed: () {
-              // TODO: Show group info
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => GroupInfoScreen(
+                    groupChat: widget.groupChat,
+                  ),
+                ),
+              );
             },
           ),
         ],
@@ -419,6 +512,23 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       child: Row(
         children: [
+          // Attach button
+          IconButton(
+            icon: _isUploading
+                ? const SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        AppTheme.primaryColor,
+                      ),
+                    ),
+                  )
+                : const Icon(Icons.attach_file, color: AppTheme.primaryColor),
+            onPressed: _isUploading ? null : _pickAndSendImage,
+            tooltip: 'Send image',
+          ),
           Expanded(
             child: TextField(
               controller: _messageController,

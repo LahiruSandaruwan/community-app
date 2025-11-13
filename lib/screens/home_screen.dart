@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/community_provider.dart';
 import '../utils/theme.dart';
+import '../widgets/offline_indicator.dart';
 import 'community/communities_screen.dart';
 import 'chat/chats_screen.dart';
 import 'profile/profile_screen.dart';
@@ -45,7 +46,12 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: _screens[_selectedIndex],
+      body: Column(
+        children: [
+          const OfflineIndicator(),
+          Expanded(child: _screens[_selectedIndex]),
+        ],
+      ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         onTap: (index) {

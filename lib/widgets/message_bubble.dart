@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../models/message_model.dart';
 import '../utils/theme.dart';
 
@@ -146,13 +147,39 @@ class MessageBubble extends StatelessWidget {
                           ),
 
                         // Message content
-                        Text(
-                          message.content,
-                          style: TextStyle(
-                            fontSize: 15,
-                            color: isMyMessage ? Colors.black87 : Colors.black87,
+                        if (message.messageType == 'image')
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: CachedNetworkImage(
+                              imageUrl: message.content,
+                              width: 200,
+                              fit: BoxFit.cover,
+                              placeholder: (context, url) => Container(
+                                width: 200,
+                                height: 200,
+                                color: AppTheme.backgroundColor,
+                                child: const Center(
+                                  child: CircularProgressIndicator(),
+                                ),
+                              ),
+                              errorWidget: (context, url, error) => Container(
+                                width: 200,
+                                height: 200,
+                                color: AppTheme.backgroundColor,
+                                child: const Center(
+                                  child: Icon(Icons.error),
+                                ),
+                              ),
+                            ),
+                          )
+                        else
+                          Text(
+                            message.content,
+                            style: TextStyle(
+                              fontSize: 15,
+                              color: isMyMessage ? Colors.black87 : Colors.black87,
+                            ),
                           ),
-                        ),
 
                         const SizedBox(height: 4),
 
