@@ -13,6 +13,8 @@ import '../../utils/constants.dart';
 import '../assignments/assignments_screen.dart';
 import '../attendance/attendance_screen.dart';
 import '../gamification/leaderboard_screen.dart';
+import '../polls/polls_screen.dart';
+import '../resources/resources_screen.dart';
 
 class GroupInfoScreen extends StatefulWidget {
   final GroupChatModel groupChat;
@@ -331,6 +333,38 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                 Navigator.of(context).push(
                   MaterialPageRoute(
                     builder: (context) => const LeaderboardScreen(),
+                  ),
+                );
+              },
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.poll, color: AppTheme.primaryColor),
+              title: const Text('Polls'),
+              subtitle: const Text('Create and vote on polls'),
+              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => PollsScreen(
+                      groupChat: widget.groupChat,
+                    ),
+                  ),
+                );
+              },
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.folder, color: AppTheme.primaryColor),
+              title: const Text('Resource Library'),
+              subtitle: const Text('Study materials and documents'),
+              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => ResourcesScreen(
+                      groupChat: widget.groupChat,
+                    ),
                   ),
                 );
               },

@@ -5,6 +5,7 @@ import '../models/message_model.dart';
 import '../utils/theme.dart';
 import 'voice_message_widget.dart';
 import 'math_text_widget.dart';
+import 'poll_widget.dart';
 
 class MessageBubble extends StatelessWidget {
   final MessageModel message;
@@ -187,6 +188,10 @@ class MessageBubble extends StatelessWidget {
                               seconds: message.metadata?['duration'] ?? 0,
                             ),
                             isMyMessage: isMyMessage,
+                          )
+                        else if (message.messageType == 'poll')
+                          PollWidget(
+                            pollId: message.content,
                           )
                         else
                           MathTextWidget(
