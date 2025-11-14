@@ -10,6 +10,9 @@ import '../../providers/auth_provider.dart';
 import '../../providers/chat_provider.dart';
 import '../../utils/theme.dart';
 import '../../utils/constants.dart';
+import '../assignments/assignments_screen.dart';
+import '../attendance/attendance_screen.dart';
+import '../gamification/leaderboard_screen.dart';
 
 class GroupInfoScreen extends StatefulWidget {
   final GroupChatModel groupChat;
@@ -279,6 +282,58 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                     ),
                 ],
               ),
+            ),
+
+            // Features Section
+            const SizedBox(height: 16),
+            const _SectionHeader(
+              title: 'Features',
+              icon: Icons.extension,
+            ),
+            ListTile(
+              leading: const Icon(Icons.assignment, color: AppTheme.primaryColor),
+              title: const Text('Assignments'),
+              subtitle: const Text('View and submit assignments'),
+              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => AssignmentsScreen(
+                      groupChat: widget.groupChat,
+                    ),
+                  ),
+                );
+              },
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.how_to_reg, color: AppTheme.primaryColor),
+              title: const Text('Attendance'),
+              subtitle: const Text('Track and mark attendance'),
+              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => AttendanceScreen(
+                      groupChat: widget.groupChat,
+                    ),
+                  ),
+                );
+              },
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.leaderboard, color: AppTheme.primaryColor),
+              title: const Text('Leaderboard'),
+              subtitle: const Text('View rankings and stats'),
+              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => const LeaderboardScreen(),
+                  ),
+                );
+              },
             ),
 
             // Pinned Messages Section
