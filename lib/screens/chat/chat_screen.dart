@@ -7,6 +7,7 @@ import '../../models/group_chat_model.dart';
 import '../../models/message_model.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/chat_provider.dart';
+import '../../providers/bookmark_provider.dart';
 import '../../services/storage_service.dart';
 import '../../services/voice_message_service.dart';
 import '../../utils/theme.dart';
@@ -383,6 +384,14 @@ class _ChatScreenState extends State<ChatScreen> {
                   _togglePinMessage(message);
                 },
               ),
+            ListTile(
+              leading: const Icon(Icons.bookmark_outline, color: AppTheme.primaryColor),
+              title: const Text('Bookmark Message'),
+              onTap: () {
+                Navigator.pop(context);
+                _bookmarkMessage(message);
+              },
+            ),
             if (isMyMessage)
               ListTile(
                 leading: const Icon(Icons.delete, color: AppTheme.errorColor),
@@ -445,6 +454,38 @@ class _ChatScreenState extends State<ChatScreen> {
       groupChatId: widget.groupChat.id,
       messageId: message.id,
     );
+  }
+
+  Future<void> _bookmarkMessage(MessageModel message) async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final bookmarkProvider = Provider.of<BookmarkProvider>(context, listen: false);
+
+    if (authProvider.currentUser == null) return;
+
+    final success = await bookmarkProvider.addBookmark(
+      userId: authProvider.currentUser!.id,
+      groupChatId: widget.groupChat.id,
+      messageId: message.id,
+    );
+
+    if (!mounted) return;
+
+    if (success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Message bookmarked'),
+          backgroundColor: AppTheme.successColor,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to bookmark message'),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+    }
   }
 
   void _showMessageInfo(MessageModel message) {
