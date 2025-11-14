@@ -4,6 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../models/message_model.dart';
 import '../utils/theme.dart';
 import 'voice_message_widget.dart';
+import 'math_text_widget.dart';
 
 class MessageBubble extends StatelessWidget {
   final MessageModel message;
@@ -188,8 +189,8 @@ class MessageBubble extends StatelessWidget {
                             isMyMessage: isMyMessage,
                           )
                         else
-                          Text(
-                            message.content,
+                          MathTextWidget(
+                            text: message.content,
                             style: TextStyle(
                               fontSize: 15,
                               color: isMyMessage ? Colors.black87 : Colors.black87,
