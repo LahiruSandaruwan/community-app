@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/theme_provider.dart';
 import '../../services/storage_service.dart';
 import '../../utils/theme.dart';
 import '../../utils/constants.dart';
@@ -324,6 +325,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 const Divider(),
 
                 // Settings Options
+                Consumer<ThemeProvider>(
+                  builder: (context, themeProvider, child) {
+                    return SwitchListTile(
+                      secondary: Icon(
+                        themeProvider.isDarkMode
+                            ? Icons.dark_mode
+                            : Icons.light_mode,
+                      ),
+                      title: const Text('Dark Mode'),
+                      subtitle: Text(
+                        themeProvider.isDarkMode ? 'Enabled' : 'Disabled',
+                      ),
+                      value: themeProvider.isDarkMode,
+                      onChanged: (value) {
+                        themeProvider.toggleTheme();
+                      },
+                    );
+                  },
+                ),
                 ListTile(
                   leading: const Icon(Icons.info_outline),
                   title: const Text('About'),

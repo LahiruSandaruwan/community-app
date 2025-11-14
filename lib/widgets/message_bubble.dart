@@ -23,6 +23,8 @@ class MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+
     return GestureDetector(
       onLongPress: onLongPress,
       child: Padding(
@@ -75,7 +77,7 @@ class MessageBubble extends StatelessWidget {
                   // Message bubble
                   Container(
                     decoration: BoxDecoration(
-                      color: _getMessageColor(),
+                      color: _getMessageColor(context),
                       borderRadius: BorderRadius.only(
                         topLeft: const Radius.circular(16),
                         topRight: const Radius.circular(16),
@@ -313,10 +315,17 @@ class MessageBubble extends StatelessWidget {
     );
   }
 
-  Color _getMessageColor() {
+  Color _getMessageColor(BuildContext context) {
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+
     if (message.isAnnouncement) {
       return AppTheme.warningColor.withOpacity(0.2);
     }
-    return isMyMessage ? AppTheme.myMessageColor : AppTheme.otherMessageColor;
+
+    if (isMyMessage) {
+      return AppTheme.getMyMessageColor(isDarkMode);
+    } else {
+      return AppTheme.getOtherMessageColor(isDarkMode);
+    }
   }
 }
