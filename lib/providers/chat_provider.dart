@@ -43,6 +43,7 @@ class ChatProvider with ChangeNotifier {
     required String content,
     String messageType = 'text',
     String? replyToMessageId,
+    Map<String, dynamic>? metadata,
   }) async {
     if (content.trim().isEmpty) return false;
 
@@ -57,6 +58,7 @@ class ChatProvider with ChangeNotifier {
         content: content,
         messageType: messageType,
         replyToMessageId: replyToMessageId,
+        metadata: metadata,
       );
       return true;
     } catch (e) {
@@ -183,6 +185,54 @@ class ChatProvider with ChangeNotifier {
       _errorMessage = e.toString();
       notifyListeners();
       return [];
+    }
+  }
+
+  // Add reaction to message
+  Future<bool> addReaction({
+    required String groupChatId,
+    required String messageId,
+    required String userId,
+    required String emoji,
+  }) async {
+    _errorMessage = null;
+
+    try {
+      await _chatService.addReaction(
+        groupChatId: groupChatId,
+        messageId: messageId,
+        userId: userId,
+        emoji: emoji,
+      );
+      return true;
+    } catch (e) {
+      _errorMessage = e.toString();
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // Remove reaction from message
+  Future<bool> removeReaction({
+    required String groupChatId,
+    required String messageId,
+    required String userId,
+    required String emoji,
+  }) async {
+    _errorMessage = null;
+
+    try {
+      await _chatService.removeReaction(
+        groupChatId: groupChatId,
+        messageId: messageId,
+        userId: userId,
+        emoji: emoji,
+      );
+      return true;
+    } catch (e) {
+      _errorMessage = e.toString();
+      notifyListeners();
+      return false;
     }
   }
 

@@ -3,17 +3,22 @@ import 'package:intl/intl.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/message_model.dart';
 import '../utils/theme.dart';
+import 'voice_message_widget.dart';
 
 class MessageBubble extends StatelessWidget {
   final MessageModel message;
   final bool isMyMessage;
   final VoidCallback? onLongPress;
+  final Function(String emoji)? onReactionTap;
+  final VoidCallback? onAddReaction;
 
   const MessageBubble({
     Key? key,
     required this.message,
     required this.isMyMessage,
     this.onLongPress,
+    this.onReactionTap,
+    this.onAddReaction,
   }) : super(key: key);
 
   @override
@@ -172,6 +177,14 @@ class MessageBubble extends StatelessWidget {
                               ),
                             ),
                           )
+                        else if (message.messageType == 'voice')
+                          VoiceMessageWidget(
+                            voiceUrl: message.content,
+                            duration: Duration(
+                              seconds: message.metadata?['duration'] ?? 0,
+                            ),
+                            isMyMessage: isMyMessage,
+                          )
                         else
                           Text(
                             message.content,
@@ -211,6 +224,13 @@ class MessageBubble extends StatelessWidget {
                       ],
                     ),
                   ),
+
+                  // Reactions display
+                  if (message.reactions.isNotEmpty || onAddReaction != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: _buildReactions(),
+                    ),
                 ],
               ),
             ),
@@ -218,6 +238,78 @@ class MessageBubble extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildReactions() {
+    return Wrap(
+      spacing: 4,
+      runSpacing: 4,
+      children: [
+        // Existing reactions
+        ...message.reactions.entries.map((entry) {
+          final emoji = entry.key;
+          final userIds = entry.value;
+          final count = userIds.length;
+
+          return GestureDetector(
+            onTap: () => onReactionTap?.call(emoji),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppTheme.backgroundColor,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: AppTheme.primaryColor.withOpacity(0.3),
+                  width: 1,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    emoji,
+                    style: const TextStyle(fontSize: 16),
+                  ),
+                  if (count > 1) ...[
+                    const SizedBox(width: 4),
+                    Text(
+                      count.toString(),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          );
+        }).toList(),
+
+        // Add reaction button
+        if (onAddReaction != null)
+          GestureDetector(
+            onTap: onAddReaction,
+            child: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: AppTheme.backgroundColor,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: AppTheme.textSecondary.withOpacity(0.3),
+                  width: 1,
+                ),
+              ),
+              child: const Icon(
+                Icons.add,
+                size: 16,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+          ),
+      ],
     );
   }
 

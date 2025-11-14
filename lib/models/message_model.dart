@@ -13,6 +13,7 @@ class MessageModel {
   final bool isPinned;
   final String? replyToMessageId; // For message replies
   final Map<String, dynamic>? metadata; // For future extensions
+  final Map<String, List<String>> reactions; // emoji -> list of user IDs
 
   MessageModel({
     required this.id,
@@ -27,11 +28,22 @@ class MessageModel {
     this.isPinned = false,
     this.replyToMessageId,
     this.metadata,
+    this.reactions = const {},
   });
 
   // Create MessageModel from Firestore document
   factory MessageModel.fromFirestore(DocumentSnapshot doc) {
     Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+
+    // Parse reactions
+    Map<String, List<String>> reactions = {};
+    if (data['reactions'] != null) {
+      final reactionsData = data['reactions'] as Map<String, dynamic>;
+      reactionsData.forEach((emoji, userIds) {
+        reactions[emoji] = List<String>.from(userIds ?? []);
+      });
+    }
+
     return MessageModel(
       id: doc.id,
       groupChatId: data['groupChatId'] ?? '',
@@ -45,6 +57,7 @@ class MessageModel {
       isPinned: data['isPinned'] ?? false,
       replyToMessageId: data['replyToMessageId'],
       metadata: data['metadata'],
+      reactions: reactions,
     );
   }
 
@@ -62,6 +75,7 @@ class MessageModel {
       'isPinned': isPinned,
       'replyToMessageId': replyToMessageId,
       'metadata': metadata,
+      'reactions': reactions,
     };
   }
 
@@ -79,6 +93,7 @@ class MessageModel {
     bool? isPinned,
     String? replyToMessageId,
     Map<String, dynamic>? metadata,
+    Map<String, List<String>>? reactions,
   }) {
     return MessageModel(
       id: id ?? this.id,
@@ -93,6 +108,7 @@ class MessageModel {
       isPinned: isPinned ?? this.isPinned,
       replyToMessageId: replyToMessageId ?? this.replyToMessageId,
       metadata: metadata ?? this.metadata,
+      reactions: reactions ?? this.reactions,
     );
   }
 

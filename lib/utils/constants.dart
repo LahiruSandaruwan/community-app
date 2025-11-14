@@ -13,7 +13,11 @@ class AppConstants {
   // Message types
   static const String messageTypeText = 'text';
   static const String messageTypeImage = 'image';
+  static const String messageTypeVoice = 'voice';
   static const String messageTypeAnnouncement = 'announcement';
+  static const String messageTypePoll = 'poll';
+  static const String messageTypeQuiz = 'quiz';
+  static const String messageTypeAssignment = 'assignment';
 
   // Storage paths
   static const String profilePicturesPath = 'profile_pictures';

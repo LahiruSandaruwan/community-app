@@ -15,6 +15,7 @@ class ChatService {
     required String content,
     String messageType = 'text',
     String? replyToMessageId,
+    Map<String, dynamic>? metadata,
   }) async {
     try {
       DocumentReference messageRef = _firestore
@@ -34,6 +35,7 @@ class ChatService {
         timestamp: DateTime.now(),
         readBy: [senderId], // Sender has read the message
         replyToMessageId: replyToMessageId,
+        metadata: metadata,
       );
 
       await messageRef.set(message.toFirestore());
@@ -322,6 +324,92 @@ class ChatService {
           .toList();
     } catch (e) {
       throw 'Failed to search messages: $e';
+    }
+  }
+
+  // Add reaction to a message
+  Future<void> addReaction({
+    required String groupChatId,
+    required String messageId,
+    required String userId,
+    required String emoji,
+  }) async {
+    try {
+      DocumentReference messageRef = _firestore
+          .collection(AppConstants.groupChatsCollection)
+          .doc(groupChatId)
+          .collection(AppConstants.messagesCollection)
+          .doc(messageId);
+
+      await _firestore.runTransaction((transaction) async {
+        DocumentSnapshot messageSnapshot = await transaction.get(messageRef);
+
+        if (!messageSnapshot.exists) {
+          throw 'Message not found';
+        }
+
+        Map<String, dynamic> data = messageSnapshot.data() as Map<String, dynamic>;
+        Map<String, dynamic> reactions = Map<String, dynamic>.from(data['reactions'] ?? {});
+
+        // Add user to the emoji's list
+        if (reactions.containsKey(emoji)) {
+          List<String> users = List<String>.from(reactions[emoji]);
+          if (!users.contains(userId)) {
+            users.add(userId);
+            reactions[emoji] = users;
+          }
+        } else {
+          reactions[emoji] = [userId];
+        }
+
+        transaction.update(messageRef, {'reactions': reactions});
+      });
+    } catch (e) {
+      throw 'Failed to add reaction: $e';
+    }
+  }
+
+  // Remove reaction from a message
+  Future<void> removeReaction({
+    required String groupChatId,
+    required String messageId,
+    required String userId,
+    required String emoji,
+  }) async {
+    try {
+      DocumentReference messageRef = _firestore
+          .collection(AppConstants.groupChatsCollection)
+          .doc(groupChatId)
+          .collection(AppConstants.messagesCollection)
+          .doc(messageId);
+
+      await _firestore.runTransaction((transaction) async {
+        DocumentSnapshot messageSnapshot = await transaction.get(messageRef);
+
+        if (!messageSnapshot.exists) {
+          throw 'Message not found';
+        }
+
+        Map<String, dynamic> data = messageSnapshot.data() as Map<String, dynamic>;
+        Map<String, dynamic> reactions = Map<String, dynamic>.from(data['reactions'] ?? {});
+
+        // Remove user from the emoji's list
+        if (reactions.containsKey(emoji)) {
+          List<String> users = List<String>.from(reactions[emoji]);
+          users.remove(userId);
+
+          if (users.isEmpty) {
+            // Remove emoji if no users left
+            reactions.remove(emoji);
+          } else {
+            reactions[emoji] = users;
+          }
+        }
+
+        transaction.update(messageRef, {'reactions': reactions});
+      });
+    } catch (e) {
+      throw 'Failed to remove reaction: $e';
     }
   }
 }

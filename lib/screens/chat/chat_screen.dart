@@ -8,6 +8,7 @@ import '../../models/message_model.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/chat_provider.dart';
 import '../../services/storage_service.dart';
+import '../../services/voice_message_service.dart';
 import '../../utils/theme.dart';
 import '../../utils/constants.dart';
 import '../../widgets/message_bubble.dart';
@@ -31,8 +32,10 @@ class _ChatScreenState extends State<ChatScreen> {
   final ScrollController _scrollController = ScrollController();
   final StorageService _storageService = StorageService();
   final ImagePicker _imagePicker = ImagePicker();
+  final VoiceMessageService _voiceService = VoiceMessageService();
   bool _isTyping = false;
   bool _isUploading = false;
+  bool _isRecording = false;
 
   @override
   void initState() {
@@ -44,6 +47,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
+    _voiceService.dispose();
     _stopTyping();
     super.dispose();
   }
@@ -185,6 +189,133 @@ class _ChatScreenState extends State<ChatScreen> {
           backgroundColor: AppTheme.errorColor,
         ),
       );
+    }
+  }
+
+  Future<void> _startRecordingVoice() async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+
+    if (authProvider.currentUser == null) return;
+
+    // Check if user can send messages (for announcement groups)
+    if (widget.groupChat.isAnnouncementOnly &&
+        !authProvider.currentUser!.isTutor) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Only tutors can send messages in this group'),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+      return;
+    }
+
+    try {
+      await _voiceService.startRecording();
+      setState(() {
+        _isRecording = true;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: ${e.toString()}'),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+    }
+  }
+
+  Future<void> _stopAndSendVoiceMessage() async {
+    if (!_isRecording) return;
+
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final chatProvider = Provider.of<ChatProvider>(context, listen: false);
+
+    if (authProvider.currentUser == null) return;
+
+    try {
+      setState(() {
+        _isRecording = false;
+        _isUploading = true;
+      });
+
+      // Stop recording and get file path
+      final filePath = await _voiceService.stopRecording();
+
+      if (filePath == null) {
+        setState(() {
+          _isUploading = false;
+        });
+        return;
+      }
+
+      // Get duration
+      final duration = await _voiceService.getAudioDuration(filePath);
+
+      // Upload to Firebase Storage
+      final voiceUrl = await _voiceService.uploadVoiceMessage(
+        filePath: filePath,
+        groupChatId: widget.groupChat.id,
+      );
+
+      // Send voice message
+      bool success = await chatProvider.sendMessage(
+        groupChatId: widget.groupChat.id,
+        senderId: authProvider.currentUser!.id,
+        senderName: authProvider.currentUser!.name,
+        senderProfileUrl: authProvider.currentUser!.profilePictureUrl,
+        content: voiceUrl,
+        messageType: AppConstants.messageTypeVoice,
+        metadata: {
+          'duration': duration.inSeconds,
+        },
+      );
+
+      setState(() {
+        _isUploading = false;
+      });
+
+      if (!success && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to send voice message'),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+      }
+
+      // Scroll to bottom
+      _scrollToBottom();
+    } catch (e) {
+      setState(() {
+        _isRecording = false;
+        _isUploading = false;
+      });
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: ${e.toString()}'),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+    }
+  }
+
+  Future<void> _cancelRecording() async {
+    if (!_isRecording) return;
+
+    try {
+      await _voiceService.cancelRecording();
+      setState(() {
+        _isRecording = false;
+      });
+    } catch (e) {
+      // Silently handle cancel errors
+      setState(() {
+        _isRecording = false;
+      });
     }
   }
 
@@ -354,6 +485,93 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  void _showReactionPicker(MessageModel message) {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    if (authProvider.currentUser == null) return;
+
+    final commonEmojis = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🎉', '🔥'];
+
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'React to message',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: commonEmojis.map((emoji) {
+                  return GestureDetector(
+                    onTap: () {
+                      Navigator.pop(context);
+                      _handleReaction(message, emoji);
+                    },
+                    child: Container(
+                      width: 56,
+                      height: 56,
+                      decoration: BoxDecoration(
+                        color: AppTheme.backgroundColor,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: AppTheme.primaryColor.withOpacity(0.3),
+                        ),
+                      ),
+                      child: Center(
+                        child: Text(
+                          emoji,
+                          style: const TextStyle(fontSize: 28),
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _handleReaction(MessageModel message, String emoji) async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final chatProvider = Provider.of<ChatProvider>(context, listen: false);
+
+    if (authProvider.currentUser == null) return;
+
+    final userId = authProvider.currentUser!.id;
+    final hasReacted = message.reactions[emoji]?.contains(userId) ?? false;
+
+    if (hasReacted) {
+      // Remove reaction
+      await chatProvider.removeReaction(
+        groupChatId: widget.groupChat.id,
+        messageId: message.id,
+        userId: userId,
+        emoji: emoji,
+      );
+    } else {
+      // Add reaction
+      await chatProvider.addReaction(
+        groupChatId: widget.groupChat.id,
+        messageId: message.id,
+        userId: userId,
+        emoji: emoji,
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
@@ -418,6 +636,8 @@ class _ChatScreenState extends State<ChatScreen> {
                         message: message,
                         isMyMessage: isMyMessage,
                         onLongPress: () => _showMessageOptions(message, isMyMessage),
+                        onReactionTap: (emoji) => _handleReaction(message, emoji),
+                        onAddReaction: () => _showReactionPicker(message),
                       );
                     },
                   ),
@@ -510,60 +730,121 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         ],
       ),
+      child: _isRecording
+          ? _buildRecordingUI()
+          : Row(
+              children: [
+                // Attach button
+                IconButton(
+                  icon: _isUploading
+                      ? const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              AppTheme.primaryColor,
+                            ),
+                          ),
+                        )
+                      : const Icon(Icons.attach_file, color: AppTheme.primaryColor),
+                  onPressed: _isUploading ? null : _pickAndSendImage,
+                  tooltip: 'Send image',
+                ),
+                Expanded(
+                  child: TextField(
+                    controller: _messageController,
+                    maxLength: AppConstants.maxMessageLength,
+                    maxLines: null,
+                    textCapitalization: TextCapitalization.sentences,
+                    decoration: InputDecoration(
+                      hintText: 'Type a message...',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide: BorderSide.none,
+                      ),
+                      filled: true,
+                      fillColor: AppTheme.backgroundColor,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 10,
+                      ),
+                      counterText: '',
+                    ),
+                    onChanged: (value) {
+                      if (value.isNotEmpty) {
+                        _startTyping();
+                      } else {
+                        _stopTyping();
+                      }
+                      setState(() {}); // Rebuild to show/hide mic button
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // Mic or Send button
+                _messageController.text.trim().isEmpty
+                    ? GestureDetector(
+                        onLongPressStart: (_) => _startRecordingVoice(),
+                        onLongPressEnd: (_) => _stopAndSendVoiceMessage(),
+                        child: CircleAvatar(
+                          backgroundColor: AppTheme.primaryColor,
+                          child: Icon(Icons.mic, color: Colors.white),
+                        ),
+                      )
+                    : CircleAvatar(
+                        backgroundColor: AppTheme.primaryColor,
+                        child: IconButton(
+                          icon: const Icon(Icons.send, color: Colors.white),
+                          onPressed: _sendMessage,
+                        ),
+                      ),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildRecordingUI() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(
         children: [
-          // Attach button
-          IconButton(
-            icon: _isUploading
-                ? const SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        AppTheme.primaryColor,
-                      ),
-                    ),
-                  )
-                : const Icon(Icons.attach_file, color: AppTheme.primaryColor),
-            onPressed: _isUploading ? null : _pickAndSendImage,
-            tooltip: 'Send image',
+          // Recording indicator
+          Container(
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(
+              color: AppTheme.errorColor,
+              shape: BoxShape.circle,
+            ),
           ),
-          Expanded(
-            child: TextField(
-              controller: _messageController,
-              maxLength: AppConstants.maxMessageLength,
-              maxLines: null,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: InputDecoration(
-                hintText: 'Type a message...',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(24),
-                  borderSide: BorderSide.none,
-                ),
-                filled: true,
-                fillColor: AppTheme.backgroundColor,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 10,
-                ),
-                counterText: '',
-              ),
-              onChanged: (value) {
-                if (value.isNotEmpty) {
-                  _startTyping();
-                } else {
-                  _stopTyping();
-                }
-              },
+          const SizedBox(width: 12),
+          // Recording text
+          const Text(
+            'Recording...',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.errorColor,
+            ),
+          ),
+          const Spacer(),
+          // Cancel button
+          TextButton.icon(
+            onPressed: _cancelRecording,
+            icon: const Icon(Icons.close, color: AppTheme.textSecondary),
+            label: const Text(
+              'Cancel',
+              style: TextStyle(color: AppTheme.textSecondary),
             ),
           ),
           const SizedBox(width: 8),
+          // Send button
           CircleAvatar(
             backgroundColor: AppTheme.primaryColor,
             child: IconButton(
               icon: const Icon(Icons.send, color: Colors.white),
-              onPressed: _sendMessage,
+              onPressed: _stopAndSendVoiceMessage,
             ),
           ),
         ],
