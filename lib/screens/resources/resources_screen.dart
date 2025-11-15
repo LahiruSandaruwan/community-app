@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:file_picker/file_picker.dart';
+// import 'package:file_picker/file_picker.dart';  // Temporarily disabled
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:io';
@@ -30,6 +30,13 @@ class _ResourcesScreenState extends State<ResourcesScreen> {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     if (authProvider.currentUser == null) return;
 
+    // TODO: Re-enable file picker when v2 embedding compatible version is available
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('File picker temporarily disabled')),
+    );
+    return;
+
+    /* Temporarily disabled due to file_picker compatibility issue
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
@@ -81,6 +88,7 @@ class _ResourcesScreenState extends State<ResourcesScreen> {
         ),
       );
     }
+    */
   }
 
   Future<void> _downloadFile(ResourceModel resource) async {

@@ -74,10 +74,16 @@ class VoiceMessageService {
   Future<Duration> getRecordingDuration(String filePath) async {
     try {
       await _player.setSourceDeviceFile(filePath);
-      return _player.getDuration() ?? Duration.zero;
+      final duration = await _player.getDuration();
+      return duration ?? Duration.zero;
     } catch (e) {
       return Duration.zero;
     }
+  }
+
+  // Alias for getRecordingDuration
+  Future<Duration> getAudioDuration(String filePath) async {
+    return getRecordingDuration(filePath);
   }
 
   // Upload voice message to Firebase Storage

@@ -17,9 +17,16 @@ class AuthProvider with ChangeNotifier {
 
   // Initialize auth state
   Future<void> initializeAuth() async {
-    User? firebaseUser = _authService.currentUser;
-    if (firebaseUser != null) {
-      _currentUser = await _authService.getUserData(firebaseUser.uid);
+    try {
+      User? firebaseUser = _authService.currentUser;
+      if (firebaseUser != null) {
+        _currentUser = await _authService.getUserData(firebaseUser.uid);
+        notifyListeners();
+      }
+    } catch (e) {
+      // Handle Firebase initialization errors gracefully
+      print('Error initializing auth: $e');
+      _currentUser = null;
       notifyListeners();
     }
   }

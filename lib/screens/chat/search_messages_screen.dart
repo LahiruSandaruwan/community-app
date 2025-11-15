@@ -59,7 +59,7 @@ class _SearchMessagesScreenState extends State<SearchMessagesScreen> {
       // Filter messages by search query
       final queryLower = query.toLowerCase();
       final results = messagesSnapshot.docs
-          .map((doc) => MessageModel.fromMap(doc.data(), doc.id))
+          .map((doc) => MessageModel.fromFirestore(doc))
           .where((message) =>
               message.content.toLowerCase().contains(queryLower) ||
               message.senderName.toLowerCase().contains(queryLower))

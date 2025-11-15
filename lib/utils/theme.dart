@@ -72,7 +72,7 @@ class AppTheme {
         backgroundColor: primaryColor,
         foregroundColor: Colors.white,
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: surfaceColor,
         elevation: 2,
         shape: RoundedRectangleBorder(
@@ -175,7 +175,7 @@ class AppTheme {
         backgroundColor: primaryColor,
         foregroundColor: Colors.white,
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: darkSurface,
         elevation: 2,
         shape: RoundedRectangleBorder(

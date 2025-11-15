@@ -22,14 +22,28 @@ class _SplashScreenState extends State<SplashScreen> {
 
     if (!mounted) return;
 
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    await authProvider.initializeAuth();
+    try {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
 
-    if (!mounted) return;
+      // Add timeout to prevent hanging
+      await authProvider.initializeAuth().timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          print('Auth initialization timed out');
+        },
+      );
 
-    if (authProvider.isAuthenticated) {
-      Navigator.of(context).pushReplacementNamed('/home');
-    } else {
+      if (!mounted) return;
+
+      if (authProvider.isAuthenticated) {
+        Navigator.of(context).pushReplacementNamed('/home');
+      } else {
+        Navigator.of(context).pushReplacementNamed('/login');
+      }
+    } catch (e) {
+      print('Error during auth check: $e');
+      if (!mounted) return;
+      // On error, go to login screen
       Navigator.of(context).pushReplacementNamed('/login');
     }
   }

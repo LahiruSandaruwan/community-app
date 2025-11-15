@@ -178,7 +178,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
       }
 
       // Reload user to update the state
-      await authProvider.loadCurrentUser();
+      await authService.getUserData(userId);
 
       if (!mounted) return;
 
