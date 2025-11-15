@@ -83,6 +83,21 @@ class AuthService {
         throw 'User profile not found. Please contact support or sign up again.';
       }
 
+      // Auto-fix: Add missing mutedGroupChatIds field if it doesn't exist
+      Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>;
+      if (!userData.containsKey('mutedGroupChatIds')) {
+        await _firestore
+            .collection(AppConstants.usersCollection)
+            .doc(userCredential.user!.uid)
+            .update({'mutedGroupChatIds': []});
+
+        // Re-fetch the user document after update
+        userDoc = await _firestore
+            .collection(AppConstants.usersCollection)
+            .doc(userCredential.user!.uid)
+            .get();
+      }
+
       UserModel user = UserModel.fromFirestore(userDoc);
 
       // Update online status
