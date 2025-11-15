@@ -170,6 +170,18 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
+  // Reload current user data from Firestore
+  Future<void> loadCurrentUser() async {
+    if (_currentUser == null) return;
+
+    try {
+      _currentUser = await _authService.getUserData(_currentUser!.id);
+      notifyListeners();
+    } catch (e) {
+      print('Error loading current user: $e');
+    }
+  }
+
   // Clear error message
   void clearError() {
     _errorMessage = null;
