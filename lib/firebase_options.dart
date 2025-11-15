@@ -51,14 +51,16 @@ class DefaultFirebaseOptions {
 
   // TODO: Replace these with your actual Firebase project configuration
   // Run: flutterfire configure
-  // This will generate the correct configuration for your Firebase project
+
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'YOUR_ANDROID_API_KEY',
-    appId: 'YOUR_ANDROID_APP_ID',
-    messagingSenderId: 'YOUR_MESSAGING_SENDER_ID',
-    projectId: 'YOUR_PROJECT_ID',
-    storageBucket: 'YOUR_STORAGE_BUCKET',
+    apiKey: 'AIzaSyCqjNBVb05XmYNCsoJ2ocG2FbxUzO46ZPA',
+    appId: '1:895133292736:android:663dc5fa25d908b7893525',
+    messagingSenderId: '895133292736',
+    projectId: 'educonnect-149ad',
+    storageBucket: 'educonnect-149ad.firebasestorage.app',
   );
+
+  // This will generate the correct configuration for your Firebase project
 
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'YOUR_IOS_API_KEY',
