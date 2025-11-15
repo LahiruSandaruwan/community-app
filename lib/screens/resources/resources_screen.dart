@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'dart:io';
 import '../../models/group_chat_model.dart';
+import '../../models/resource_model.dart';
 import '../../providers/auth_provider.dart';
-import '../../services/storage_service.dart';
+import '../../services/resource_service.dart';
 import '../../utils/theme.dart';
 
 class ResourcesScreen extends StatefulWidget {
@@ -21,30 +23,8 @@ class ResourcesScreen extends StatefulWidget {
 }
 
 class _ResourcesScreenState extends State<ResourcesScreen> {
-  final StorageService _storageService = StorageService();
-  List<Map<String, dynamic>> _resources = [];
-  bool _isLoading = false;
+  final ResourceService _resourceService = ResourceService();
   bool _isUploading = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadResources();
-  }
-
-  Future<void> _loadResources() async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    // TODO: Load resources from Firestore
-    // For now, showing empty state
-    await Future.delayed(const Duration(milliseconds: 500));
-
-    setState(() {
-      _isLoading = false;
-    });
-  }
 
   Future<void> _uploadFile() async {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
@@ -65,9 +45,14 @@ class _ResourcesScreenState extends State<ResourcesScreen> {
         final file = File(result.files.single.path!);
         final fileName = result.files.single.name;
 
-        // Upload to Firebase Storage
-        // TODO: Implement actual upload to resources folder
-        await Future.delayed(const Duration(seconds: 2)); // Simulating upload
+        // Upload to Firebase Storage and Firestore
+        await _resourceService.uploadResource(
+          groupChatId: widget.groupChat.id,
+          file: file,
+          fileName: fileName,
+          uploadedBy: authProvider.currentUser!.id,
+          uploaderName: authProvider.currentUser!.name,
+        );
 
         setState(() {
           _isUploading = false;
@@ -81,14 +66,78 @@ class _ResourcesScreenState extends State<ResourcesScreen> {
             backgroundColor: AppTheme.successColor,
           ),
         );
-
-        _loadResources();
       }
     } catch (e) {
       setState(() {
         _isUploading = false;
       });
 
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: ${e.toString()}'),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+    }
+  }
+
+  Future<void> _downloadFile(ResourceModel resource) async {
+    try {
+      final uri = Uri.parse(resource.fileUrl);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        throw 'Could not open file';
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error opening file: ${e.toString()}'),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+    }
+  }
+
+  Future<void> _deleteResource(ResourceModel resource) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Resource?'),
+        content: Text('Are you sure you want to delete "${resource.fileName}"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.errorColor,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      await _resourceService.deleteResource(resource.id);
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Resource deleted successfully'),
+          backgroundColor: AppTheme.successColor,
+        ),
+      );
+    } catch (e) {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -126,67 +175,100 @@ class _ResourcesScreenState extends State<ResourcesScreen> {
             ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _resources.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.folder_open,
-                        size: 80,
-                        color: AppTheme.textSecondary.withOpacity(0.5),
-                      ),
-                      const SizedBox(height: 16),
-                      const Text(
-                        'No resources yet',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        isTutor
-                            ? 'Upload study materials and documents'
-                            : 'Check back later for study materials',
-                        style: TextStyle(color: AppTheme.textSecondary),
-                        textAlign: TextAlign.center,
-                      ),
-                      if (isTutor) ...[
-                        const SizedBox(height: 24),
-                        ElevatedButton.icon(
-                          onPressed: _uploadFile,
-                          icon: const Icon(Icons.upload_file),
-                          label: const Text('Upload File'),
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 24,
-                              vertical: 12,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
+      body: StreamBuilder<List<ResourceModel>>(
+        stream: _resourceService.getResources(widget.groupChat.id),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          if (snapshot.hasError) {
+            return Center(
+              child: Text('Error: ${snapshot.error}'),
+            );
+          }
+
+          final resources = snapshot.data ?? [];
+
+          if (resources.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.folder_open,
+                    size: 80,
+                    color: AppTheme.textSecondary.withOpacity(0.5),
                   ),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _resources.length,
-                  itemBuilder: (context, index) {
-                    final resource = _resources[index];
-                    return _ResourceCard(resource: resource);
-                  },
-                ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'No resources yet',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    isTutor
+                        ? 'Upload study materials and documents'
+                        : 'Check back later for study materials',
+                    style: TextStyle(color: AppTheme.textSecondary),
+                    textAlign: TextAlign.center,
+                  ),
+                  if (isTutor) ...[
+                    const SizedBox(height: 24),
+                    ElevatedButton.icon(
+                      onPressed: _uploadFile,
+                      icon: const Icon(Icons.upload_file),
+                      label: const Text('Upload File'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            );
+          }
+
+          return ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: resources.length,
+            itemBuilder: (context, index) {
+              final resource = resources[index];
+              return _ResourceCard(
+                resource: resource,
+                isTutor: isTutor,
+                currentUserId: authProvider.currentUser?.id ?? '',
+                onDownload: () => _downloadFile(resource),
+                onDelete: () => _deleteResource(resource),
+              );
+            },
+          );
+        },
+      ),
     );
   }
 }
 
 class _ResourceCard extends StatelessWidget {
-  final Map<String, dynamic> resource;
+  final ResourceModel resource;
+  final bool isTutor;
+  final String currentUserId;
+  final VoidCallback onDownload;
+  final VoidCallback onDelete;
 
-  const _ResourceCard({required this.resource});
+  const _ResourceCard({
+    required this.resource,
+    required this.isTutor,
+    required this.currentUserId,
+    required this.onDownload,
+    required this.onDelete,
+  });
 
   IconData _getFileIcon(String extension) {
     switch (extension.toLowerCase()) {
@@ -230,24 +312,20 @@ class _ResourceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fileName = resource['name'] ?? 'Unknown';
-    final extension = fileName.split('.').last;
-    final uploadedBy = resource['uploadedBy'] ?? 'Unknown';
-    final uploadedAt = resource['uploadedAt'] as DateTime?;
-    final fileSize = resource['size'] ?? 0;
+    final canDelete = isTutor || resource.uploadedBy == currentUserId;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: ListTile(
         leading: CircleAvatar(
-          backgroundColor: _getFileColor(extension).withOpacity(0.1),
+          backgroundColor: _getFileColor(resource.extension).withOpacity(0.1),
           child: Icon(
-            _getFileIcon(extension),
-            color: _getFileColor(extension),
+            _getFileIcon(resource.extension),
+            color: _getFileColor(resource.extension),
           ),
         ),
         title: Text(
-          fileName,
+          resource.fileName,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontWeight: FontWeight.w600),
@@ -256,34 +334,32 @@ class _ResourceCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: 4),
-            Text('Uploaded by $uploadedBy'),
-            if (uploadedAt != null) ...[
-              const SizedBox(height: 2),
-              Text(
-                DateFormat.yMd().add_jm().format(uploadedAt),
-                style: const TextStyle(fontSize: 12),
-              ),
-            ],
+            Text('Uploaded by ${resource.uploaderName}'),
+            const SizedBox(height: 2),
+            Text(
+              '${DateFormat.yMd().add_jm().format(resource.uploadedAt)} • ${resource.formattedSize}',
+              style: const TextStyle(fontSize: 12),
+            ),
           ],
         ),
-        trailing: IconButton(
-          icon: const Icon(Icons.download),
-          onPressed: () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Download feature - Coming soon!'),
-              ),
-            );
-          },
-        ),
-        onTap: () {
-          // TODO: Open file viewer
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('File viewer - Coming soon!'),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.download),
+              onPressed: onDownload,
+              tooltip: 'Download',
             ),
-          );
-        },
+            if (canDelete)
+              IconButton(
+                icon: const Icon(Icons.delete),
+                color: AppTheme.errorColor,
+                onPressed: onDelete,
+                tooltip: 'Delete',
+              ),
+          ],
+        ),
+        onTap: onDownload,
       ),
     );
   }

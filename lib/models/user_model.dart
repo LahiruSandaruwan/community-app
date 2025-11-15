@@ -12,6 +12,7 @@ class UserModel {
   final bool isOnline;
   final String? fcmToken;
   final List<String> communityIds; // Communities user is part of
+  final List<String> mutedGroupChatIds; // Group chats with muted notifications
 
   UserModel({
     required this.id,
@@ -25,6 +26,7 @@ class UserModel {
     this.isOnline = false,
     this.fcmToken,
     this.communityIds = const [],
+    this.mutedGroupChatIds = const [],
   });
 
   // Create UserModel from Firestore document
@@ -42,6 +44,7 @@ class UserModel {
       isOnline: data['isOnline'] ?? false,
       fcmToken: data['fcmToken'],
       communityIds: List<String>.from(data['communityIds'] ?? []),
+      mutedGroupChatIds: List<String>.from(data['mutedGroupChatIds'] ?? []),
     );
   }
 
@@ -58,6 +61,7 @@ class UserModel {
       'isOnline': isOnline,
       'fcmToken': fcmToken,
       'communityIds': communityIds,
+      'mutedGroupChatIds': mutedGroupChatIds,
     };
   }
 
@@ -74,6 +78,7 @@ class UserModel {
     bool? isOnline,
     String? fcmToken,
     List<String>? communityIds,
+    List<String>? mutedGroupChatIds,
   }) {
     return UserModel(
       id: id ?? this.id,
@@ -87,6 +92,7 @@ class UserModel {
       isOnline: isOnline ?? this.isOnline,
       fcmToken: fcmToken ?? this.fcmToken,
       communityIds: communityIds ?? this.communityIds,
+      mutedGroupChatIds: mutedGroupChatIds ?? this.mutedGroupChatIds,
     );
   }
 

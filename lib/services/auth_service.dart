@@ -185,6 +185,34 @@ class AuthService {
     }
   }
 
+  // Mute group chat notifications
+  Future<void> muteGroupChat(String userId, String groupChatId) async {
+    try {
+      await _firestore
+          .collection(AppConstants.usersCollection)
+          .doc(userId)
+          .update({
+        'mutedGroupChatIds': FieldValue.arrayUnion([groupChatId]),
+      });
+    } catch (e) {
+      throw 'Failed to mute group chat: $e';
+    }
+  }
+
+  // Unmute group chat notifications
+  Future<void> unmuteGroupChat(String userId, String groupChatId) async {
+    try {
+      await _firestore
+          .collection(AppConstants.usersCollection)
+          .doc(userId)
+          .update({
+        'mutedGroupChatIds': FieldValue.arrayRemove([groupChatId]),
+      });
+    } catch (e) {
+      throw 'Failed to unmute group chat: $e';
+    }
+  }
+
   // Reset password
   Future<void> resetPassword(String email) async {
     try {

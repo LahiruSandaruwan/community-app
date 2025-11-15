@@ -272,6 +272,50 @@ class CommunityService {
     }
   }
 
+  // Make user an admin
+  Future<void> makeAdmin({
+    required String communityId,
+    required String userId,
+  }) async {
+    try {
+      await _firestore
+          .collection(AppConstants.communitiesCollection)
+          .doc(communityId)
+          .update({
+        'adminIds': FieldValue.arrayUnion([userId]),
+      });
+    } catch (e) {
+      throw 'Failed to make user admin: $e';
+    }
+  }
+
+  // Remove admin privileges
+  Future<void> removeAdmin({
+    required String communityId,
+    required String userId,
+  }) async {
+    try {
+      // Check if this is the last admin
+      CommunityModel? community = await getCommunityById(communityId);
+      if (community == null) {
+        throw AppConstants.errorCommunityNotFound;
+      }
+
+      if (community.adminIds.length <= 1) {
+        throw 'Cannot remove the last admin. Community must have at least one admin.';
+      }
+
+      await _firestore
+          .collection(AppConstants.communitiesCollection)
+          .doc(communityId)
+          .update({
+        'adminIds': FieldValue.arrayRemove([userId]),
+      });
+    } catch (e) {
+      throw 'Failed to remove admin: $e';
+    }
+  }
+
   // Regenerate invite code
   Future<String> regenerateInviteCode(String communityId) async {
     try {

@@ -8,6 +8,8 @@ import '../../models/user_model.dart';
 import '../../models/message_model.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/chat_provider.dart';
+import '../../services/community_service.dart';
+import '../../services/auth_service.dart';
 import '../../utils/theme.dart';
 import '../../utils/constants.dart';
 import '../assignments/assignments_screen.dart';
@@ -15,6 +17,7 @@ import '../attendance/attendance_screen.dart';
 import '../gamification/leaderboard_screen.dart';
 import '../polls/polls_screen.dart';
 import '../resources/resources_screen.dart';
+import 'search_messages_screen.dart';
 
 class GroupInfoScreen extends StatefulWidget {
   final GroupChatModel groupChat;
@@ -124,13 +127,77 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
 
     if (confirmed != true) return;
 
-    // TODO: Implement leave group functionality
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Leave group feature - Coming soon!'),
-        backgroundColor: AppTheme.warningColor,
-      ),
-    );
+    try {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final userId = authProvider.currentUser?.id;
+
+      if (userId == null) return;
+
+      final communityService = CommunityService();
+      await communityService.removeMemberFromCommunity(
+        communityId: widget.groupChat.communityId,
+        userId: userId,
+      );
+
+      if (!mounted) return;
+
+      // Navigate back to communities screen
+      Navigator.of(context).popUntil((route) => route.isFirst);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You have left the community'),
+          backgroundColor: AppTheme.successColor,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: ${e.toString()}'),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+    }
+  }
+
+  Future<void> _toggleMute(bool mute) async {
+    try {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final userId = authProvider.currentUser?.id;
+
+      if (userId == null) return;
+
+      final authService = AuthService();
+
+      if (mute) {
+        await authService.muteGroupChat(userId, widget.groupChat.id);
+      } else {
+        await authService.unmuteGroupChat(userId, widget.groupChat.id);
+      }
+
+      // Reload user to update the state
+      await authProvider.loadCurrentUser();
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(mute ? 'Group muted' : 'Group unmuted'),
+          backgroundColor: AppTheme.successColor,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: ${e.toString()}'),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+    }
   }
 
   void _showMemberProfile(UserModel member) {
@@ -429,20 +496,22 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
               title: 'Settings',
               icon: Icons.settings,
             ),
-            ListTile(
-              leading: const Icon(Icons.notifications, color: AppTheme.primaryColor),
-              title: const Text('Notifications'),
-              subtitle: const Text('Mute this group'),
-              trailing: Switch(
-                value: false, // TODO: Implement mute functionality
-                onChanged: (value) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Mute feature - Coming soon!'),
-                    ),
-                  );
-                },
-              ),
+            Consumer<AuthProvider>(
+              builder: (context, authProvider, child) {
+                final isMuted = authProvider.currentUser?.mutedGroupChatIds
+                        .contains(widget.groupChat.id) ??
+                    false;
+
+                return ListTile(
+                  leading: const Icon(Icons.notifications, color: AppTheme.primaryColor),
+                  title: const Text('Notifications'),
+                  subtitle: Text(isMuted ? 'Unmute this group' : 'Mute this group'),
+                  trailing: Switch(
+                    value: isMuted,
+                    onChanged: (value) => _toggleMute(value),
+                  ),
+                );
+              },
             ),
             const Divider(height: 1),
             ListTile(
@@ -451,10 +520,12 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
               subtitle: const Text('Find messages in this group'),
               trailing: const Icon(Icons.arrow_forward_ios, size: 16),
               onTap: () {
-                // TODO: Implement search
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Search feature - Coming soon!'),
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => SearchMessagesScreen(
+                      groupChat: widget.groupChat,
+                    ),
                   ),
                 );
               },

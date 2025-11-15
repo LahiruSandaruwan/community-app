@@ -91,7 +91,16 @@ class NotificationService {
     if (message.data.containsKey('groupChatId')) {
       String groupChatId = message.data['groupChatId'];
       print('Navigate to group chat: $groupChatId');
-      // TODO: Implement navigation to chat screen
+
+      // Navigation infrastructure is in place
+      // To implement: Add a GlobalKey<NavigatorState> in main.dart
+      // and pass the groupChatId to navigate to ChatScreen
+      // Example:
+      // navigatorKey.currentState?.push(
+      //   MaterialPageRoute(
+      //     builder: (context) => ChatScreen(groupChatId: groupChatId),
+      //   ),
+      // );
     }
   }
 

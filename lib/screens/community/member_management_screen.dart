@@ -5,6 +5,7 @@ import '../../models/community_model.dart';
 import '../../models/user_model.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/community_provider.dart';
+import '../../services/community_service.dart';
 import '../../utils/theme.dart';
 import '../../utils/constants.dart';
 
@@ -125,13 +126,104 @@ class _MemberManagementScreenState extends State<MemberManagementScreen> {
   }
 
   Future<void> _makeAdmin(UserModel member) async {
-    // TODO: Implement make admin functionality
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Make admin feature - Coming soon!'),
-        backgroundColor: AppTheme.primaryColor,
-      ),
-    );
+    // Check if member is already an admin
+    if (widget.community.adminIds.contains(member.id)) {
+      // Remove admin privileges
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Remove Admin Privileges'),
+          content: Text('Remove admin privileges from ${member.name}?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Remove'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed != true) return;
+
+      try {
+        final communityService = CommunityService();
+        await communityService.removeAdmin(
+          communityId: widget.community.id,
+          userId: member.id,
+        );
+
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${member.name} is no longer an admin'),
+            backgroundColor: AppTheme.successColor,
+          ),
+        );
+        _loadMembers();
+      } catch (e) {
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${e.toString()}'),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+      }
+    } else {
+      // Make admin
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Make Admin'),
+          content: Text('Give admin privileges to ${member.name}?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Make Admin'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed != true) return;
+
+      try {
+        final communityService = CommunityService();
+        await communityService.makeAdmin(
+          communityId: widget.community.id,
+          userId: member.id,
+        );
+
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${member.name} is now an admin'),
+            backgroundColor: AppTheme.successColor,
+          ),
+        );
+        _loadMembers();
+      } catch (e) {
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${e.toString()}'),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+      }
+    }
   }
 
   @override
