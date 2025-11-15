@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+// Firestore removed - using PocketBase now
+// import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../models/community_model.dart';
 import '../../models/user_model.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/community_provider.dart';
 import '../../services/community_service.dart';
+import '../../services/pocketbase_auth_service.dart';
 import '../../utils/theme.dart';
-import '../../utils/constants.dart';
 
 class MemberManagementScreen extends StatefulWidget {
   final CommunityModel community;
@@ -22,7 +23,7 @@ class MemberManagementScreen extends StatefulWidget {
 }
 
 class _MemberManagementScreenState extends State<MemberManagementScreen> {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final PocketBaseAuthService _authService = PocketBaseAuthService();
   List<UserModel> _members = [];
   bool _isLoading = true;
 
@@ -40,13 +41,9 @@ class _MemberManagementScreenState extends State<MemberManagementScreen> {
     try {
       List<UserModel> members = [];
       for (String memberId in widget.community.memberIds) {
-        DocumentSnapshot doc = await _firestore
-            .collection(AppConstants.usersCollection)
-            .doc(memberId)
-            .get();
-
-        if (doc.exists) {
-          members.add(UserModel.fromFirestore(doc));
+        final user = await _authService.getUserData(memberId);
+        if (user != null) {
+          members.add(user);
         }
       }
 

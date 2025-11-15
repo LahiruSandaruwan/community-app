@@ -1,11 +1,12 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:pocketbase/pocketbase.dart';
 import 'package:uuid/uuid.dart';
 import '../models/community_model.dart';
 import '../models/group_chat_model.dart';
 import '../utils/constants.dart';
+import 'pocketbase_service.dart';
 
 class CommunityService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final PocketBase _pb = PocketBaseService().client;
   final Uuid _uuid = const Uuid();
 
   // Create a new community
@@ -19,32 +20,33 @@ class CommunityService {
       // Generate unique invite code
       String inviteCode = _generateInviteCode();
 
-      // Create community document
-      DocumentReference communityRef =
-          _firestore.collection(AppConstants.communitiesCollection).doc();
+      // Create community data
+      final communityData = {
+        'name': name,
+        'description': description,
+        'createdBy': createdBy,
+        'createdAt': DateTime.now().toIso8601String(),
+        'communityImageUrl': communityImageUrl ?? '',
+        'memberIds': [createdBy], // Creator is first member
+        'adminIds': [createdBy], // Creator is admin
+        'groupChatIds': [],
+        'inviteCode': inviteCode,
+        'isActive': true,
+      };
 
-      CommunityModel community = CommunityModel(
-        id: communityRef.id,
-        name: name,
-        description: description,
-        createdBy: createdBy,
-        createdAt: DateTime.now(),
-        communityImageUrl: communityImageUrl,
-        memberIds: [createdBy], // Creator is first member
-        adminIds: [createdBy], // Creator is admin
-        groupChatIds: [],
-        inviteCode: inviteCode,
-        isActive: true,
-      );
+      // Create community in PocketBase
+      final record = await _pb
+          .collection(AppConstants.communitiesCollection)
+          .create(body: communityData);
 
-      await communityRef.set(community.toFirestore());
+      final community = CommunityModel.fromPocketBase(record);
 
       // Add community to user's communityIds
-      await _addCommunityToUser(createdBy, communityRef.id);
+      await _addCommunityToUser(createdBy, record.id);
 
       // Create default announcement group
       await createGroupChat(
-        communityId: communityRef.id,
+        communityId: record.id,
         name: 'Announcements',
         description: 'Important announcements from tutors',
         createdBy: createdBy,
@@ -52,6 +54,8 @@ class CommunityService {
       );
 
       return community;
+    } on ClientException catch (e) {
+      throw 'Failed to create community: ${e.response}';
     } catch (e) {
       throw 'Failed to create community: $e';
     }
@@ -64,32 +68,30 @@ class CommunityService {
   }) async {
     try {
       // Find community with invite code
-      QuerySnapshot querySnapshot = await _firestore
+      final records = await _pb
           .collection(AppConstants.communitiesCollection)
-          .where('inviteCode', isEqualTo: inviteCode)
-          .where('isActive', isEqualTo: true)
-          .limit(1)
-          .get();
+          .getFullList(
+            filter: 'inviteCode = "$inviteCode" && isActive = true',
+          );
 
-      if (querySnapshot.docs.isEmpty) {
+      if (records.isEmpty) {
         throw AppConstants.errorInvalidInviteCode;
       }
 
-      DocumentSnapshot communityDoc = querySnapshot.docs.first;
-      CommunityModel community = CommunityModel.fromFirestore(communityDoc);
+      final communityRecord = records.first;
+      CommunityModel community = CommunityModel.fromPocketBase(communityRecord);
 
       // Check if user is already a member
       if (community.memberIds.contains(userId)) {
         throw 'You are already a member of this community';
       }
 
-      // Add user to community
-      await _firestore
-          .collection(AppConstants.communitiesCollection)
-          .doc(community.id)
-          .update({
-        'memberIds': FieldValue.arrayUnion([userId]),
-      });
+      // Add user to community memberIds (manual array operation)
+      final updatedMemberIds = [...community.memberIds, userId];
+      await _pb.collection(AppConstants.communitiesCollection).update(
+        community.id,
+        body: {'memberIds': updatedMemberIds},
+      );
 
       // Add community to user's communityIds
       await _addCommunityToUser(userId, community.id);
@@ -100,38 +102,62 @@ class CommunityService {
       }
 
       return community.copyWith(
-        memberIds: [...community.memberIds, userId],
+        memberIds: updatedMemberIds,
       );
+    } on ClientException catch (e) {
+      throw 'Failed to join community: ${e.response}';
     } catch (e) {
       throw 'Failed to join community: $e';
     }
   }
 
   // Get user's communities
-  Stream<List<CommunityModel>> getUserCommunities(String userId) {
-    return _firestore
-        .collection(AppConstants.communitiesCollection)
-        .where('memberIds', arrayContains: userId)
-        .where('isActive', isEqualTo: true)
-        .orderBy('createdAt', descending: true)
-        .snapshots()
-        .map((snapshot) =>
-            snapshot.docs.map((doc) => CommunityModel.fromFirestore(doc)).toList());
+  Stream<List<CommunityModel>> getUserCommunities(String userId) async* {
+    // Initial fetch
+    List<CommunityModel> communities = await _fetchUserCommunities(userId);
+    yield communities;
+
+    // Subscribe to real-time updates
+    await for (final _ in Stream.periodic(const Duration(seconds: 2))) {
+      try {
+        communities = await _fetchUserCommunities(userId);
+        yield communities;
+      } catch (e) {
+        // Continue with previous data on error
+        yield communities;
+      }
+    }
+  }
+
+  // Helper method to fetch user communities
+  Future<List<CommunityModel>> _fetchUserCommunities(String userId) async {
+    try {
+      final records = await _pb
+          .collection(AppConstants.communitiesCollection)
+          .getFullList(
+            filter: 'memberIds ~ "$userId" && isActive = true',
+            sort: '-createdAt',
+          );
+
+      return records.map((record) => CommunityModel.fromPocketBase(record)).toList();
+    } catch (e) {
+      throw 'Failed to fetch user communities: $e';
+    }
   }
 
   // Get community by ID
   Future<CommunityModel?> getCommunityById(String communityId) async {
     try {
-      DocumentSnapshot doc = await _firestore
+      final record = await _pb
           .collection(AppConstants.communitiesCollection)
-          .doc(communityId)
-          .get();
+          .getOne(communityId);
 
-      if (!doc.exists) {
+      return CommunityModel.fromPocketBase(record);
+    } on ClientException catch (e) {
+      if (e.statusCode == 404) {
         return null;
       }
-
-      return CommunityModel.fromFirestore(doc);
+      throw 'Failed to get community: ${e.response}';
     } catch (e) {
       throw 'Failed to get community: $e';
     }
@@ -152,62 +178,112 @@ class CommunityService {
         throw AppConstants.errorCommunityNotFound;
       }
 
-      // Create group chat document
-      DocumentReference groupRef =
-          _firestore.collection(AppConstants.groupChatsCollection).doc();
+      // Create group chat data
+      final groupChatData = {
+        'name': name,
+        'description': description,
+        'communityId': communityId,
+        'createdBy': createdBy,
+        'createdAt': DateTime.now().toIso8601String(),
+        'groupImageUrl': '',
+        'memberIds': community.memberIds, // All community members
+        'isAnnouncementOnly': isAnnouncementOnly,
+        'lastMessageAt': '',
+        'lastMessage': '',
+        'lastMessageSenderId': '',
+        'unreadCounts': {},
+        'pinnedMessageIds': [],
+        'isActive': true,
+      };
 
-      GroupChatModel groupChat = GroupChatModel(
-        id: groupRef.id,
-        name: name,
-        description: description,
-        communityId: communityId,
-        createdBy: createdBy,
-        createdAt: DateTime.now(),
-        memberIds: community.memberIds, // All community members
-        isAnnouncementOnly: isAnnouncementOnly,
-        isActive: true,
+      // Create group chat in PocketBase
+      final record = await _pb
+          .collection(AppConstants.groupChatsCollection)
+          .create(body: groupChatData);
+
+      final groupChat = GroupChatModel.fromPocketBase(record);
+
+      // Add group chat ID to community (manual array operation)
+      final updatedGroupChatIds = [...community.groupChatIds, record.id];
+      await _pb.collection(AppConstants.communitiesCollection).update(
+        communityId,
+        body: {'groupChatIds': updatedGroupChatIds},
       );
 
-      await groupRef.set(groupChat.toFirestore());
-
-      // Add group chat ID to community
-      await _firestore
-          .collection(AppConstants.communitiesCollection)
-          .doc(communityId)
-          .update({
-        'groupChatIds': FieldValue.arrayUnion([groupRef.id]),
-      });
-
       return groupChat;
+    } on ClientException catch (e) {
+      throw 'Failed to create group chat: ${e.response}';
     } catch (e) {
       throw 'Failed to create group chat: $e';
     }
   }
 
   // Get community's group chats
-  Stream<List<GroupChatModel>> getCommunityGroupChats(String communityId) {
-    return _firestore
-        .collection(AppConstants.groupChatsCollection)
-        .where('communityId', isEqualTo: communityId)
-        .where('isActive', isEqualTo: true)
-        .orderBy('createdAt', descending: false)
-        .snapshots()
-        .map((snapshot) => snapshot.docs
-            .map((doc) => GroupChatModel.fromFirestore(doc))
-            .toList());
+  Stream<List<GroupChatModel>> getCommunityGroupChats(String communityId) async* {
+    // Initial fetch
+    List<GroupChatModel> groupChats = await _fetchCommunityGroupChats(communityId);
+    yield groupChats;
+
+    // Subscribe to real-time updates
+    await for (final _ in Stream.periodic(const Duration(seconds: 2))) {
+      try {
+        groupChats = await _fetchCommunityGroupChats(communityId);
+        yield groupChats;
+      } catch (e) {
+        // Continue with previous data on error
+        yield groupChats;
+      }
+    }
+  }
+
+  // Helper method to fetch community group chats
+  Future<List<GroupChatModel>> _fetchCommunityGroupChats(String communityId) async {
+    try {
+      final records = await _pb
+          .collection(AppConstants.groupChatsCollection)
+          .getFullList(
+            filter: 'communityId = "$communityId" && isActive = true',
+            sort: 'createdAt',
+          );
+
+      return records.map((record) => GroupChatModel.fromPocketBase(record)).toList();
+    } catch (e) {
+      throw 'Failed to fetch community group chats: $e';
+    }
   }
 
   // Get user's active group chats (across all communities)
-  Stream<List<GroupChatModel>> getUserGroupChats(String userId) {
-    return _firestore
-        .collection(AppConstants.groupChatsCollection)
-        .where('memberIds', arrayContains: userId)
-        .where('isActive', isEqualTo: true)
-        .orderBy('lastMessageAt', descending: true)
-        .snapshots()
-        .map((snapshot) => snapshot.docs
-            .map((doc) => GroupChatModel.fromFirestore(doc))
-            .toList());
+  Stream<List<GroupChatModel>> getUserGroupChats(String userId) async* {
+    // Initial fetch
+    List<GroupChatModel> groupChats = await _fetchUserGroupChats(userId);
+    yield groupChats;
+
+    // Subscribe to real-time updates
+    await for (final _ in Stream.periodic(const Duration(seconds: 2))) {
+      try {
+        groupChats = await _fetchUserGroupChats(userId);
+        yield groupChats;
+      } catch (e) {
+        // Continue with previous data on error
+        yield groupChats;
+      }
+    }
+  }
+
+  // Helper method to fetch user group chats
+  Future<List<GroupChatModel>> _fetchUserGroupChats(String userId) async {
+    try {
+      final records = await _pb
+          .collection(AppConstants.groupChatsCollection)
+          .getFullList(
+            filter: 'memberIds ~ "$userId" && isActive = true',
+            sort: '-lastMessageAt',
+          );
+
+      return records.map((record) => GroupChatModel.fromPocketBase(record)).toList();
+    } catch (e) {
+      throw 'Failed to fetch user group chats: $e';
+    }
   }
 
   // Remove member from community
@@ -221,13 +297,12 @@ class CommunityService {
         throw AppConstants.errorCommunityNotFound;
       }
 
-      // Remove user from community
-      await _firestore
-          .collection(AppConstants.communitiesCollection)
-          .doc(communityId)
-          .update({
-        'memberIds': FieldValue.arrayRemove([userId]),
-      });
+      // Remove user from community memberIds (manual array operation)
+      final updatedMemberIds = community.memberIds.where((id) => id != userId).toList();
+      await _pb.collection(AppConstants.communitiesCollection).update(
+        communityId,
+        body: {'memberIds': updatedMemberIds},
+      );
 
       // Remove community from user's communityIds
       await _removeCommunityFromUser(userId, communityId);
@@ -236,6 +311,8 @@ class CommunityService {
       for (String groupChatId in community.groupChatIds) {
         await _removeMemberFromGroupChat(groupChatId, userId);
       }
+    } on ClientException catch (e) {
+      throw 'Failed to remove member: ${e.response}';
     } catch (e) {
       throw 'Failed to remove member: $e';
     }
@@ -250,23 +327,25 @@ class CommunityService {
       }
 
       // Mark community as inactive
-      await _firestore
-          .collection(AppConstants.communitiesCollection)
-          .doc(communityId)
-          .update({'isActive': false});
+      await _pb.collection(AppConstants.communitiesCollection).update(
+        communityId,
+        body: {'isActive': false},
+      );
 
       // Mark all group chats as inactive
       for (String groupChatId in community.groupChatIds) {
-        await _firestore
-            .collection(AppConstants.groupChatsCollection)
-            .doc(groupChatId)
-            .update({'isActive': false});
+        await _pb.collection(AppConstants.groupChatsCollection).update(
+          groupChatId,
+          body: {'isActive': false},
+        );
       }
 
       // Remove community from all users
       for (String userId in community.memberIds) {
         await _removeCommunityFromUser(userId, communityId);
       }
+    } on ClientException catch (e) {
+      throw 'Failed to delete community: ${e.response}';
     } catch (e) {
       throw 'Failed to delete community: $e';
     }
@@ -278,12 +357,22 @@ class CommunityService {
     required String userId,
   }) async {
     try {
-      await _firestore
-          .collection(AppConstants.communitiesCollection)
-          .doc(communityId)
-          .update({
-        'adminIds': FieldValue.arrayUnion([userId]),
-      });
+      // Get current community data
+      CommunityModel? community = await getCommunityById(communityId);
+      if (community == null) {
+        throw AppConstants.errorCommunityNotFound;
+      }
+
+      // Add userId to adminIds if not already present (manual array operation)
+      if (!community.adminIds.contains(userId)) {
+        final updatedAdminIds = [...community.adminIds, userId];
+        await _pb.collection(AppConstants.communitiesCollection).update(
+          communityId,
+          body: {'adminIds': updatedAdminIds},
+        );
+      }
+    } on ClientException catch (e) {
+      throw 'Failed to make user admin: ${e.response}';
     } catch (e) {
       throw 'Failed to make user admin: $e';
     }
@@ -305,12 +394,14 @@ class CommunityService {
         throw 'Cannot remove the last admin. Community must have at least one admin.';
       }
 
-      await _firestore
-          .collection(AppConstants.communitiesCollection)
-          .doc(communityId)
-          .update({
-        'adminIds': FieldValue.arrayRemove([userId]),
-      });
+      // Remove userId from adminIds (manual array operation)
+      final updatedAdminIds = community.adminIds.where((id) => id != userId).toList();
+      await _pb.collection(AppConstants.communitiesCollection).update(
+        communityId,
+        body: {'adminIds': updatedAdminIds},
+      );
+    } on ClientException catch (e) {
+      throw 'Failed to remove admin: ${e.response}';
     } catch (e) {
       throw 'Failed to remove admin: $e';
     }
@@ -321,12 +412,14 @@ class CommunityService {
     try {
       String newInviteCode = _generateInviteCode();
 
-      await _firestore
-          .collection(AppConstants.communitiesCollection)
-          .doc(communityId)
-          .update({'inviteCode': newInviteCode});
+      await _pb.collection(AppConstants.communitiesCollection).update(
+        communityId,
+        body: {'inviteCode': newInviteCode},
+      );
 
       return newInviteCode;
+    } on ClientException catch (e) {
+      throw 'Failed to regenerate invite code: ${e.response}';
     } catch (e) {
       throw 'Failed to regenerate invite code: $e';
     }
@@ -334,36 +427,90 @@ class CommunityService {
 
   // Helper: Add community to user's communityIds
   Future<void> _addCommunityToUser(String userId, String communityId) async {
-    await _firestore.collection(AppConstants.usersCollection).doc(userId).update({
-      'communityIds': FieldValue.arrayUnion([communityId]),
-    });
+    try {
+      // Get current user data
+      final userRecord = await _pb
+          .collection(AppConstants.usersCollection)
+          .getOne(userId);
+
+      final communityIds = List<String>.from(userRecord.data['communityIds'] ?? []);
+
+      // Add communityId if not already present
+      if (!communityIds.contains(communityId)) {
+        communityIds.add(communityId);
+        await _pb.collection(AppConstants.usersCollection).update(
+          userId,
+          body: {'communityIds': communityIds},
+        );
+      }
+    } catch (e) {
+      throw 'Failed to add community to user: $e';
+    }
   }
 
   // Helper: Remove community from user's communityIds
   Future<void> _removeCommunityFromUser(String userId, String communityId) async {
-    await _firestore.collection(AppConstants.usersCollection).doc(userId).update({
-      'communityIds': FieldValue.arrayRemove([communityId]),
-    });
+    try {
+      // Get current user data
+      final userRecord = await _pb
+          .collection(AppConstants.usersCollection)
+          .getOne(userId);
+
+      final communityIds = List<String>.from(userRecord.data['communityIds'] ?? []);
+
+      // Remove communityId
+      communityIds.remove(communityId);
+      await _pb.collection(AppConstants.usersCollection).update(
+        userId,
+        body: {'communityIds': communityIds},
+      );
+    } catch (e) {
+      throw 'Failed to remove community from user: $e';
+    }
   }
 
   // Helper: Add member to group chat
   Future<void> _addMemberToGroupChat(String groupChatId, String userId) async {
-    await _firestore
-        .collection(AppConstants.groupChatsCollection)
-        .doc(groupChatId)
-        .update({
-      'memberIds': FieldValue.arrayUnion([userId]),
-    });
+    try {
+      // Get current group chat data
+      final groupChatRecord = await _pb
+          .collection(AppConstants.groupChatsCollection)
+          .getOne(groupChatId);
+
+      final memberIds = List<String>.from(groupChatRecord.data['memberIds'] ?? []);
+
+      // Add userId if not already present
+      if (!memberIds.contains(userId)) {
+        memberIds.add(userId);
+        await _pb.collection(AppConstants.groupChatsCollection).update(
+          groupChatId,
+          body: {'memberIds': memberIds},
+        );
+      }
+    } catch (e) {
+      throw 'Failed to add member to group chat: $e';
+    }
   }
 
   // Helper: Remove member from group chat
   Future<void> _removeMemberFromGroupChat(String groupChatId, String userId) async {
-    await _firestore
-        .collection(AppConstants.groupChatsCollection)
-        .doc(groupChatId)
-        .update({
-      'memberIds': FieldValue.arrayRemove([userId]),
-    });
+    try {
+      // Get current group chat data
+      final groupChatRecord = await _pb
+          .collection(AppConstants.groupChatsCollection)
+          .getOne(groupChatId);
+
+      final memberIds = List<String>.from(groupChatRecord.data['memberIds'] ?? []);
+
+      // Remove userId
+      memberIds.remove(userId);
+      await _pb.collection(AppConstants.groupChatsCollection).update(
+        groupChatId,
+        body: {'memberIds': memberIds},
+      );
+    } catch (e) {
+      throw 'Failed to remove member from group chat: $e';
+    }
   }
 
   // Helper: Generate unique invite code

@@ -1,9 +1,15 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:pocketbase/pocketbase.dart';
 import '../models/message_model.dart';
 import '../utils/constants.dart';
+import 'pocketbase_service.dart';
+import 'dart:async';
 
 class BookmarkService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final PocketBase _pb = PocketBaseService().client;
+
+  // Store active subscriptions for cleanup
+  final Map<String, StreamController<List<Map<String, dynamic>>>> _bookmarkStreams = {};
+  final Map<String, Timer> _pollingTimers = {};
 
   // Bookmark a message
   Future<void> addBookmark({
@@ -13,17 +19,19 @@ class BookmarkService {
     String? note,
   }) async {
     try {
-      await _firestore
-          .collection('users')
-          .doc(userId)
-          .collection('bookmarks')
-          .doc(messageId)
-          .set({
+      final now = DateTime.now();
+
+      final bookmarkData = {
+        'userId': userId,
         'messageId': messageId,
         'groupChatId': groupChatId,
-        'bookmarkedAt': FieldValue.serverTimestamp(),
-        'note': note,
-      });
+        'bookmarkedAt': now.toIso8601String(),
+        'note': note ?? '',
+      };
+
+      await _pb.collection('bookmarks').create(body: bookmarkData);
+    } on ClientException catch (e) {
+      throw 'Failed to bookmark message: ${e.response['message'] ?? e.toString()}';
     } catch (e) {
       throw 'Failed to bookmark message: $e';
     }
@@ -35,12 +43,17 @@ class BookmarkService {
     required String messageId,
   }) async {
     try {
-      await _firestore
-          .collection('users')
-          .doc(userId)
-          .collection('bookmarks')
-          .doc(messageId)
-          .delete();
+      // Find the bookmark by userId and messageId
+      final records = await _pb.collection('bookmarks').getFullList(
+        filter: 'userId = "$userId" && messageId = "$messageId"',
+      );
+
+      // Delete all matching bookmarks (should be only one)
+      for (var record in records) {
+        await _pb.collection('bookmarks').delete(record.id);
+      }
+    } on ClientException catch (e) {
+      throw 'Failed to remove bookmark: ${e.response['message'] ?? e.toString()}';
     } catch (e) {
       throw 'Failed to remove bookmark: $e';
     }
@@ -52,14 +65,11 @@ class BookmarkService {
     required String messageId,
   }) async {
     try {
-      final doc = await _firestore
-          .collection('users')
-          .doc(userId)
-          .collection('bookmarks')
-          .doc(messageId)
-          .get();
+      final records = await _pb.collection('bookmarks').getFullList(
+        filter: 'userId = "$userId" && messageId = "$messageId"',
+      );
 
-      return doc.exists;
+      return records.isNotEmpty;
     } catch (e) {
       return false;
     }
@@ -69,47 +79,88 @@ class BookmarkService {
   Stream<List<Map<String, dynamic>>> getBookmarks({
     required String userId,
   }) {
-    return _firestore
-        .collection('users')
-        .doc(userId)
-        .collection('bookmarks')
-        .orderBy('bookmarkedAt', descending: true)
-        .snapshots()
-        .asyncMap((snapshot) async {
-      List<Map<String, dynamic>> bookmarks = [];
+    final streamKey = 'bookmarks_$userId';
 
-      for (var bookmarkDoc in snapshot.docs) {
-        Map<String, dynamic> bookmarkData =
-            bookmarkDoc.data();
+    // Return existing stream if already active
+    if (_bookmarkStreams.containsKey(streamKey)) {
+      return _bookmarkStreams[streamKey]!.stream;
+    }
 
-        final groupChatId = bookmarkData['groupChatId'];
-        final messageId = bookmarkData['messageId'];
+    // Create new stream controller
+    final controller = StreamController<List<Map<String, dynamic>>>.broadcast(
+      onCancel: () {
+        _pollingTimers[streamKey]?.cancel();
+        _pollingTimers.remove(streamKey);
+        _bookmarkStreams.remove(streamKey);
+      },
+    );
 
-        // Fetch the actual message
-        try {
-          final messageDoc = await _firestore
-              .collection(AppConstants.groupChatsCollection)
-              .doc(groupChatId)
-              .collection(AppConstants.messagesCollection)
-              .doc(messageId)
-              .get();
+    _bookmarkStreams[streamKey] = controller;
 
-          if (messageDoc.exists) {
-            final message = MessageModel.fromFirestore(messageDoc);
+    // Fetch and emit data periodically
+    void fetchData() async {
+      try {
+        final records = await _pb.collection('bookmarks').getFullList(
+          filter: 'userId = "$userId"',
+          sort: '-bookmarkedAt',
+        );
+
+        List<Map<String, dynamic>> bookmarks = [];
+
+        for (var bookmarkRecord in records) {
+          final groupChatId = bookmarkRecord.data['groupChatId'];
+          final messageId = bookmarkRecord.data['messageId'];
+
+          // Fetch the actual message
+          try {
+            final messageRecord = await _pb.collection(AppConstants.messagesCollection).getOne(
+              messageId,
+            );
+
+            final message = MessageModel.fromPocketBase(messageRecord);
             bookmarks.add({
-              'bookmarkId': bookmarkDoc.id,
+              'bookmarkId': bookmarkRecord.id,
               'message': message,
               'groupChatId': groupChatId,
-              'bookmarkedAt': bookmarkData['bookmarkedAt'],
-              'note': bookmarkData['note'],
+              'bookmarkedAt': bookmarkRecord.data['bookmarkedAt'],
+              'note': bookmarkRecord.data['note'],
             });
+          } catch (e) {
+            print('Failed to fetch bookmarked message: $e');
           }
-        } catch (e) {
-          print('Failed to fetch bookmarked message: $e');
+        }
+
+        if (!controller.isClosed) {
+          controller.add(bookmarks);
+        }
+      } catch (e) {
+        if (!controller.isClosed) {
+          controller.addError('Failed to fetch bookmarks: $e');
         }
       }
+    }
 
-      return bookmarks;
-    });
+    // Initial fetch
+    fetchData();
+
+    // Poll every 3 seconds
+    _pollingTimers[streamKey] = Timer.periodic(
+      const Duration(seconds: 3),
+      (_) => fetchData(),
+    );
+
+    return controller.stream;
+  }
+
+  // Cleanup resources
+  void dispose() {
+    for (var timer in _pollingTimers.values) {
+      timer.cancel();
+    }
+    for (var controller in _bookmarkStreams.values) {
+      controller.close();
+    }
+    _pollingTimers.clear();
+    _bookmarkStreams.clear();
   }
 }

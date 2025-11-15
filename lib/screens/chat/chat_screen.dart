@@ -9,7 +9,8 @@ import '../../providers/auth_provider.dart';
 import '../../providers/chat_provider.dart';
 import '../../providers/bookmark_provider.dart';
 import '../../services/storage_service.dart';
-import '../../services/voice_message_service.dart';
+// Voice message service temporarily disabled
+// import '../../services/voice_message_service.dart';
 import '../../utils/theme.dart';
 import '../../utils/constants.dart';
 import '../../widgets/message_bubble.dart';
@@ -33,7 +34,8 @@ class _ChatScreenState extends State<ChatScreen> {
   final ScrollController _scrollController = ScrollController();
   final StorageService _storageService = StorageService();
   final ImagePicker _imagePicker = ImagePicker();
-  final VoiceMessageService _voiceService = VoiceMessageService();
+  // Voice message service temporarily disabled
+  // final VoiceMessageService _voiceService = VoiceMessageService();
   bool _isTyping = false;
   bool _isUploading = false;
   bool _isRecording = false;
@@ -48,7 +50,8 @@ class _ChatScreenState extends State<ChatScreen> {
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
-    _voiceService.dispose();
+    // Voice message service temporarily disabled
+    // _voiceService.dispose();
     _stopTyping();
     super.dispose();
   }
@@ -194,6 +197,16 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _startRecordingVoice() async {
+    // Voice message feature temporarily disabled
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Voice messages temporarily disabled'),
+        backgroundColor: AppTheme.warningColor,
+      ),
+    );
+
+    /* ORIGINAL CODE (DISABLED)
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
 
     if (authProvider.currentUser == null) return;
@@ -224,9 +237,17 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       );
     }
+    */
   }
 
   Future<void> _stopAndSendVoiceMessage() async {
+    // Voice message feature temporarily disabled
+    setState(() {
+      _isRecording = false;
+      _isUploading = false;
+    });
+
+    /* ORIGINAL CODE (DISABLED)
     if (!_isRecording) return;
 
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
@@ -302,11 +323,18 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       );
     }
+    */
   }
 
   Future<void> _cancelRecording() async {
     if (!_isRecording) return;
 
+    // Voice message feature temporarily disabled
+    setState(() {
+      _isRecording = false;
+    });
+
+    /* ORIGINAL CODE (DISABLED)
     try {
       await _voiceService.cancelRecording();
       setState(() {
@@ -318,6 +346,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _isRecording = false;
       });
     }
+    */
   }
 
   void _scrollToBottom() {

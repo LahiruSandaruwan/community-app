@@ -1,8 +1,14 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:pocketbase/pocketbase.dart';
 import '../models/assignment_model.dart';
+import 'pocketbase_service.dart';
+import 'dart:async';
 
 class AssignmentService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final PocketBase _pb = PocketBaseService().client;
+
+  // Store active subscriptions for cleanup
+  final Map<String, StreamController<List<AssignmentModel>>> _assignmentStreams = {};
+  final Map<String, Timer> _pollingTimers = {};
 
   // Create assignment
   Future<String> createAssignment({
@@ -17,23 +23,29 @@ class AssignmentService {
     List<String> attachmentUrls = const [],
   }) async {
     try {
-      final docRef = await _firestore.collection('assignments').add({
+      final now = DateTime.now();
+
+      final assignmentData = {
         'communityId': communityId,
         'groupChatId': groupChatId,
         'title': title,
         'description': description,
         'createdBy': createdBy,
         'creatorName': creatorName,
-        'createdAt': FieldValue.serverTimestamp(),
-        'dueDate': Timestamp.fromDate(dueDate),
+        'createdAt': now.toIso8601String(),
+        'dueDate': dueDate.toIso8601String(),
         'totalPoints': totalPoints,
         'attachmentUrls': attachmentUrls,
         'submittedBy': [],
         'submissions': {},
         'isActive': true,
-      });
+      };
 
-      return docRef.id;
+      final record = await _pb.collection('assignments').create(body: assignmentData);
+
+      return record.id;
+    } on ClientException catch (e) {
+      throw 'Failed to create assignment: ${e.response['message'] ?? e.toString()}';
     } catch (e) {
       throw 'Failed to create assignment: $e';
     }
@@ -41,15 +53,54 @@ class AssignmentService {
 
   // Get assignments for a group
   Stream<List<AssignmentModel>> getAssignments(String groupChatId) {
-    return _firestore
-        .collection('assignments')
-        .where('groupChatId', isEqualTo: groupChatId)
-        .where('isActive', isEqualTo: true)
-        .orderBy('dueDate', descending: false)
-        .snapshots()
-        .map((snapshot) => snapshot.docs
-            .map((doc) => AssignmentModel.fromFirestore(doc))
-            .toList());
+    final streamKey = 'assignments_$groupChatId';
+
+    // Return existing stream if already active
+    if (_assignmentStreams.containsKey(streamKey)) {
+      return _assignmentStreams[streamKey]!.stream;
+    }
+
+    // Create new stream controller
+    final controller = StreamController<List<AssignmentModel>>.broadcast(
+      onCancel: () {
+        _pollingTimers[streamKey]?.cancel();
+        _pollingTimers.remove(streamKey);
+        _assignmentStreams.remove(streamKey);
+      },
+    );
+
+    _assignmentStreams[streamKey] = controller;
+
+    // Fetch and emit data periodically
+    void fetchData() async {
+      try {
+        final records = await _pb.collection('assignments').getFullList(
+          filter: 'groupChatId = "$groupChatId" && isActive = true',
+          sort: '+dueDate',
+        );
+
+        if (!controller.isClosed) {
+          controller.add(
+            records.map((record) => AssignmentModel.fromPocketBase(record)).toList()
+          );
+        }
+      } catch (e) {
+        if (!controller.isClosed) {
+          controller.addError('Failed to fetch assignments: $e');
+        }
+      }
+    }
+
+    // Initial fetch
+    fetchData();
+
+    // Poll every 3 seconds
+    _pollingTimers[streamKey] = Timer.periodic(
+      const Duration(seconds: 3),
+      (_) => fetchData(),
+    );
+
+    return controller.stream;
   }
 
   // Submit assignment
@@ -61,19 +112,37 @@ class AssignmentService {
     String? notes,
   }) async {
     try {
-      await _firestore.collection('assignments').doc(assignmentId).update({
-        'submittedBy': FieldValue.arrayUnion([studentId]),
-        'submissions.$studentId': {
-          'studentId': studentId,
-          'studentName': studentName,
-          'submittedAt': FieldValue.serverTimestamp(),
-          'fileUrls': fileUrls,
-          'notes': notes,
-          'grade': null,
-          'feedback': null,
-          'gradedAt': null,
+      // Get current assignment
+      final assignment = await _pb.collection('assignments').getOne(assignmentId);
+
+      // Update submittedBy array
+      final submittedBy = List<String>.from(assignment.data['submittedBy'] ?? []);
+      if (!submittedBy.contains(studentId)) {
+        submittedBy.add(studentId);
+      }
+
+      // Update submissions map
+      final submissions = Map<String, dynamic>.from(assignment.data['submissions'] ?? {});
+      submissions[studentId] = {
+        'studentId': studentId,
+        'studentName': studentName,
+        'submittedAt': DateTime.now().toIso8601String(),
+        'fileUrls': fileUrls,
+        'notes': notes,
+        'grade': null,
+        'feedback': null,
+        'gradedAt': null,
+      };
+
+      await _pb.collection('assignments').update(
+        assignmentId,
+        body: {
+          'submittedBy': submittedBy,
+          'submissions': submissions,
         },
-      });
+      );
+    } on ClientException catch (e) {
+      throw 'Failed to submit assignment: ${e.response['message'] ?? e.toString()}';
     } catch (e) {
       throw 'Failed to submit assignment: $e';
     }
@@ -87,11 +156,28 @@ class AssignmentService {
     String? feedback,
   }) async {
     try {
-      await _firestore.collection('assignments').doc(assignmentId).update({
-        'submissions.$studentId.grade': grade,
-        'submissions.$studentId.feedback': feedback,
-        'submissions.$studentId.gradedAt': FieldValue.serverTimestamp(),
-      });
+      // Get current assignment
+      final assignment = await _pb.collection('assignments').getOne(assignmentId);
+
+      // Update submissions map
+      final submissions = Map<String, dynamic>.from(assignment.data['submissions'] ?? {});
+
+      if (submissions.containsKey(studentId)) {
+        final submission = Map<String, dynamic>.from(submissions[studentId]);
+        submission['grade'] = grade;
+        submission['feedback'] = feedback;
+        submission['gradedAt'] = DateTime.now().toIso8601String();
+        submissions[studentId] = submission;
+
+        await _pb.collection('assignments').update(
+          assignmentId,
+          body: {'submissions': submissions},
+        );
+      } else {
+        throw 'Submission not found for student';
+      }
+    } on ClientException catch (e) {
+      throw 'Failed to grade submission: ${e.response['message'] ?? e.toString()}';
     } catch (e) {
       throw 'Failed to grade submission: $e';
     }
@@ -100,12 +186,26 @@ class AssignmentService {
   // Delete assignment
   Future<void> deleteAssignment(String assignmentId) async {
     try {
-      await _firestore
-          .collection('assignments')
-          .doc(assignmentId)
-          .update({'isActive': false});
+      await _pb.collection('assignments').update(
+        assignmentId,
+        body: {'isActive': false},
+      );
+    } on ClientException catch (e) {
+      throw 'Failed to delete assignment: ${e.response['message'] ?? e.toString()}';
     } catch (e) {
       throw 'Failed to delete assignment: $e';
     }
+  }
+
+  // Cleanup resources
+  void dispose() {
+    for (var timer in _pollingTimers.values) {
+      timer.cancel();
+    }
+    for (var controller in _assignmentStreams.values) {
+      controller.close();
+    }
+    _pollingTimers.clear();
+    _assignmentStreams.clear();
   }
 }

@@ -1,4 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:pocketbase/pocketbase.dart';
 
 class CommunityModel {
   final String id;
@@ -29,33 +29,34 @@ class CommunityModel {
     this.metadata,
   });
 
-  // Create CommunityModel from Firestore document
-  factory CommunityModel.fromFirestore(DocumentSnapshot doc) {
-    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+  // Create CommunityModel from PocketBase record
+  factory CommunityModel.fromPocketBase(RecordModel record) {
     return CommunityModel(
-      id: doc.id,
-      name: data['name'] ?? '',
-      description: data['description'] ?? '',
-      createdBy: data['createdBy'] ?? '',
-      createdAt: (data['createdAt'] as Timestamp).toDate(),
-      communityImageUrl: data['communityImageUrl'],
-      memberIds: List<String>.from(data['memberIds'] ?? []),
-      adminIds: List<String>.from(data['adminIds'] ?? []),
-      groupChatIds: List<String>.from(data['groupChatIds'] ?? []),
-      inviteCode: data['inviteCode'] ?? '',
-      isActive: data['isActive'] ?? true,
-      metadata: data['metadata'],
+      id: record.id,
+      name: record.getStringValue('name'),
+      description: record.getStringValue('description'),
+      createdBy: record.getStringValue('createdBy'),
+      createdAt: DateTime.parse(record.getStringValue('createdAt', DateTime.now().toIso8601String())),
+      communityImageUrl: record.getStringValue('communityImageUrl', '').isEmpty
+          ? null
+          : record.getStringValue('communityImageUrl'),
+      memberIds: record.getListValue<String>('memberIds'),
+      adminIds: record.getListValue<String>('adminIds'),
+      groupChatIds: record.getListValue<String>('groupChatIds'),
+      inviteCode: record.getStringValue('inviteCode'),
+      isActive: record.getBoolValue('isActive', true),
+      metadata: record.data['metadata'] as Map<String, dynamic>?,
     );
   }
 
-  // Convert CommunityModel to Firestore document
-  Map<String, dynamic> toFirestore() {
+  // Convert CommunityModel to PocketBase record data
+  Map<String, dynamic> toPocketBase() {
     return {
       'name': name,
       'description': description,
       'createdBy': createdBy,
-      'createdAt': Timestamp.fromDate(createdAt),
-      'communityImageUrl': communityImageUrl,
+      'createdAt': createdAt.toIso8601String(),
+      'communityImageUrl': communityImageUrl ?? '',
       'memberIds': memberIds,
       'adminIds': adminIds,
       'groupChatIds': groupChatIds,

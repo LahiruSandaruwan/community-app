@@ -1,4 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:pocketbase/pocketbase.dart';
 
 class AttendanceModel {
   final String id;
@@ -21,28 +21,30 @@ class AttendanceModel {
     this.lateUserIds = const [],
   });
 
-  // Create from Firestore document
-  factory AttendanceModel.fromMap(Map<String, dynamic> map, String id) {
+  // Create from PocketBase record
+  factory AttendanceModel.fromPocketBase(RecordModel record) {
     return AttendanceModel(
-      id: id,
-      groupChatId: map['groupChatId'] ?? '',
-      sessionName: map['sessionName'] ?? '',
-      createdBy: map['createdBy'] ?? '',
-      startTime: (map['startTime'] as Timestamp).toDate(),
-      endTime: map['endTime'] != null ? (map['endTime'] as Timestamp).toDate() : null,
-      presentUserIds: List<String>.from(map['presentUserIds'] ?? []),
-      lateUserIds: List<String>.from(map['lateUserIds'] ?? []),
+      id: record.id,
+      groupChatId: record.getStringValue('groupChatId'),
+      sessionName: record.getStringValue('sessionName'),
+      createdBy: record.getStringValue('createdBy'),
+      startTime: DateTime.parse(record.getStringValue('startTime', DateTime.now().toIso8601String())),
+      endTime: record.getStringValue('endTime', '').isEmpty
+          ? null
+          : DateTime.parse(record.getStringValue('endTime')),
+      presentUserIds: record.getListValue<String>('presentUserIds'),
+      lateUserIds: record.getListValue<String>('lateUserIds'),
     );
   }
 
-  // Convert to Firestore document
-  Map<String, dynamic> toMap() {
+  // Convert to PocketBase record data
+  Map<String, dynamic> toPocketBase() {
     return {
       'groupChatId': groupChatId,
       'sessionName': sessionName,
       'createdBy': createdBy,
-      'startTime': Timestamp.fromDate(startTime),
-      'endTime': endTime != null ? Timestamp.fromDate(endTime!) : null,
+      'startTime': startTime.toIso8601String(),
+      'endTime': endTime?.toIso8601String() ?? '',
       'presentUserIds': presentUserIds,
       'lateUserIds': lateUserIds,
     };

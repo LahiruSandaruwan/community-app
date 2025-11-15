@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+// Firestore removed - using PocketBase now
+// import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import '../../models/group_chat_model.dart';
 import '../../models/user_model.dart';
@@ -9,9 +10,8 @@ import '../../models/message_model.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/chat_provider.dart';
 import '../../services/community_service.dart';
-import '../../services/auth_service.dart';
+import '../../services/pocketbase_auth_service.dart';
 import '../../utils/theme.dart';
-import '../../utils/constants.dart';
 import '../assignments/assignments_screen.dart';
 import '../attendance/attendance_screen.dart';
 import '../gamification/leaderboard_screen.dart';
@@ -32,7 +32,7 @@ class GroupInfoScreen extends StatefulWidget {
 }
 
 class _GroupInfoScreenState extends State<GroupInfoScreen> {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final PocketBaseAuthService _authService = PocketBaseAuthService();
   List<UserModel> _members = [];
   List<MessageModel> _pinnedMessages = [];
   bool _isLoadingMembers = true;
@@ -53,13 +53,9 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     try {
       List<UserModel> members = [];
       for (String memberId in widget.groupChat.memberIds) {
-        DocumentSnapshot doc = await _firestore
-            .collection(AppConstants.usersCollection)
-            .doc(memberId)
-            .get();
-
-        if (doc.exists) {
-          members.add(UserModel.fromFirestore(doc));
+        final user = await _authService.getUserData(memberId);
+        if (user != null) {
+          members.add(user);
         }
       }
 
@@ -169,12 +165,10 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
 
       if (userId == null) return;
 
-      final authService = AuthService();
-
       if (mute) {
-        await authService.muteGroupChat(userId, widget.groupChat.id);
+        await _authService.muteGroupChat(userId, widget.groupChat.id);
       } else {
-        await authService.unmuteGroupChat(userId, widget.groupChat.id);
+        await _authService.unmuteGroupChat(userId, widget.groupChat.id);
       }
 
       // Reload user to update the state

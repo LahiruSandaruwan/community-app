@@ -1,4 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:pocketbase/pocketbase.dart';
 
 class ResourceModel {
   final String id;
@@ -39,23 +39,23 @@ class ResourceModel {
     }
   }
 
-  // Create from Firestore document
-  factory ResourceModel.fromMap(Map<String, dynamic> map, String id) {
+  // Create from PocketBase record
+  factory ResourceModel.fromPocketBase(RecordModel record) {
     return ResourceModel(
-      id: id,
-      groupChatId: map['groupChatId'] ?? '',
-      fileName: map['fileName'] ?? '',
-      fileUrl: map['fileUrl'] ?? '',
-      fileType: map['fileType'] ?? '',
-      fileSize: map['fileSize'] ?? 0,
-      uploadedBy: map['uploadedBy'] ?? '',
-      uploaderName: map['uploaderName'] ?? '',
-      uploadedAt: (map['uploadedAt'] as Timestamp).toDate(),
+      id: record.id,
+      groupChatId: record.getStringValue('groupChatId'),
+      fileName: record.getStringValue('fileName'),
+      fileUrl: record.getStringValue('fileUrl'),
+      fileType: record.getStringValue('fileType'),
+      fileSize: record.getIntValue('fileSize'),
+      uploadedBy: record.getStringValue('uploadedBy'),
+      uploaderName: record.getStringValue('uploaderName'),
+      uploadedAt: DateTime.parse(record.getStringValue('uploadedAt', DateTime.now().toIso8601String())),
     );
   }
 
-  // Convert to Firestore document
-  Map<String, dynamic> toMap() {
+  // Convert to PocketBase record data
+  Map<String, dynamic> toPocketBase() {
     return {
       'groupChatId': groupChatId,
       'fileName': fileName,
@@ -64,7 +64,7 @@ class ResourceModel {
       'fileSize': fileSize,
       'uploadedBy': uploadedBy,
       'uploaderName': uploaderName,
-      'uploadedAt': Timestamp.fromDate(uploadedAt),
+      'uploadedAt': uploadedAt.toIso8601String(),
     };
   }
 

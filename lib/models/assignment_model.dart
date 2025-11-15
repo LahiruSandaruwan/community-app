@@ -1,4 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:pocketbase/pocketbase.dart';
 
 class AssignmentModel {
   final String id;
@@ -35,34 +35,40 @@ class AssignmentModel {
     this.category,
   });
 
-  factory AssignmentModel.fromFirestore(DocumentSnapshot doc) {
-    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+  factory AssignmentModel.fromPocketBase(RecordModel record) {
+    // Parse submissions from JSON
+    Map<String, AssignmentSubmission> submissions = {};
+    final submissionsData = record.data['submissions'];
+    if (submissionsData != null && submissionsData is Map) {
+      submissionsData.forEach((key, value) {
+        if (value is Map<String, dynamic>) {
+          submissions[key] = AssignmentSubmission.fromMap(value);
+        }
+      });
+    }
+
     return AssignmentModel(
-      id: doc.id,
-      communityId: data['communityId'] ?? '',
-      groupChatId: data['groupChatId'] ?? '',
-      title: data['title'] ?? '',
-      description: data['description'] ?? '',
-      createdBy: data['createdBy'] ?? '',
-      creatorName: data['creatorName'] ?? '',
-      createdAt: (data['createdAt'] as Timestamp).toDate(),
-      dueDate: (data['dueDate'] as Timestamp).toDate(),
-      totalPoints: data['totalPoints'] ?? 100,
-      attachmentUrls: List<String>.from(data['attachmentUrls'] ?? []),
-      submittedBy: List<String>.from(data['submittedBy'] ?? []),
-      submissions: (data['submissions'] as Map<String, dynamic>?)?.map(
-            (key, value) => MapEntry(
-              key,
-              AssignmentSubmission.fromMap(value as Map<String, dynamic>),
-            ),
-          ) ??
-          {},
-      isActive: data['isActive'] ?? true,
-      category: data['category'],
+      id: record.id,
+      communityId: record.getStringValue('communityId'),
+      groupChatId: record.getStringValue('groupChatId'),
+      title: record.getStringValue('title'),
+      description: record.getStringValue('description'),
+      createdBy: record.getStringValue('createdBy'),
+      creatorName: record.getStringValue('creatorName'),
+      createdAt: DateTime.parse(record.getStringValue('createdAt', DateTime.now().toIso8601String())),
+      dueDate: DateTime.parse(record.getStringValue('dueDate', DateTime.now().toIso8601String())),
+      totalPoints: record.getIntValue('totalPoints', 100),
+      attachmentUrls: record.getListValue<String>('attachmentUrls'),
+      submittedBy: record.getListValue<String>('submittedBy'),
+      submissions: submissions,
+      isActive: record.getBoolValue('isActive', true),
+      category: record.getStringValue('category', '').isEmpty
+          ? null
+          : record.getStringValue('category'),
     );
   }
 
-  Map<String, dynamic> toFirestore() {
+  Map<String, dynamic> toPocketBase() {
     return {
       'communityId': communityId,
       'groupChatId': groupChatId,
@@ -70,14 +76,14 @@ class AssignmentModel {
       'description': description,
       'createdBy': createdBy,
       'creatorName': creatorName,
-      'createdAt': Timestamp.fromDate(createdAt),
-      'dueDate': Timestamp.fromDate(dueDate),
+      'createdAt': createdAt.toIso8601String(),
+      'dueDate': dueDate.toIso8601String(),
       'totalPoints': totalPoints,
       'attachmentUrls': attachmentUrls,
       'submittedBy': submittedBy,
       'submissions': submissions.map((key, value) => MapEntry(key, value.toMap())),
       'isActive': isActive,
-      'category': category,
+      'category': category ?? '',
     };
   }
 
@@ -110,13 +116,13 @@ class AssignmentSubmission {
     return AssignmentSubmission(
       studentId: map['studentId'] ?? '',
       studentName: map['studentName'] ?? '',
-      submittedAt: (map['submittedAt'] as Timestamp).toDate(),
+      submittedAt: DateTime.parse(map['submittedAt'] ?? DateTime.now().toIso8601String()),
       fileUrls: List<String>.from(map['fileUrls'] ?? []),
-      notes: map['notes'],
+      notes: map['notes']?.isEmpty ?? true ? null : map['notes'],
       grade: map['grade'],
-      feedback: map['feedback'],
-      gradedAt: map['gradedAt'] != null
-          ? (map['gradedAt'] as Timestamp).toDate()
+      feedback: map['feedback']?.isEmpty ?? true ? null : map['feedback'],
+      gradedAt: map['gradedAt'] != null && (map['gradedAt'] as String).isNotEmpty
+          ? DateTime.parse(map['gradedAt'])
           : null,
     );
   }
@@ -125,12 +131,12 @@ class AssignmentSubmission {
     return {
       'studentId': studentId,
       'studentName': studentName,
-      'submittedAt': Timestamp.fromDate(submittedAt),
+      'submittedAt': submittedAt.toIso8601String(),
       'fileUrls': fileUrls,
-      'notes': notes,
+      'notes': notes ?? '',
       'grade': grade,
-      'feedback': feedback,
-      'gradedAt': gradedAt != null ? Timestamp.fromDate(gradedAt!) : null,
+      'feedback': feedback ?? '',
+      'gradedAt': gradedAt?.toIso8601String() ?? '',
     };
   }
 

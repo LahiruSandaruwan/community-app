@@ -1,4 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:pocketbase/pocketbase.dart';
 
 class PollModel {
   final String id;
@@ -25,42 +25,42 @@ class PollModel {
     this.isAnonymous = false,
   });
 
-  factory PollModel.fromFirestore(DocumentSnapshot doc) {
-    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
-
+  factory PollModel.fromPocketBase(RecordModel record) {
     Map<String, List<String>> votes = {};
-    if (data['votes'] != null) {
-      final votesData = data['votes'] as Map<String, dynamic>;
+    final votesData = record.data['votes'];
+    if (votesData != null && votesData is Map) {
       votesData.forEach((option, userIds) {
-        votes[option] = List<String>.from(userIds ?? []);
+        if (userIds is List) {
+          votes[option.toString()] = List<String>.from(userIds);
+        }
       });
     }
 
     return PollModel(
-      id: doc.id,
-      groupChatId: data['groupChatId'] ?? '',
-      question: data['question'] ?? '',
-      options: List<String>.from(data['options'] ?? []),
+      id: record.id,
+      groupChatId: record.getStringValue('groupChatId'),
+      question: record.getStringValue('question'),
+      options: record.getListValue<String>('options'),
       votes: votes,
-      createdBy: data['createdBy'] ?? '',
-      createdAt: (data['createdAt'] as Timestamp).toDate(),
-      expiresAt: data['expiresAt'] != null
-          ? (data['expiresAt'] as Timestamp).toDate()
-          : null,
-      allowMultiple: data['allowMultiple'] ?? false,
-      isAnonymous: data['isAnonymous'] ?? false,
+      createdBy: record.getStringValue('createdBy'),
+      createdAt: DateTime.parse(record.getStringValue('createdAt', DateTime.now().toIso8601String())),
+      expiresAt: record.getStringValue('expiresAt', '').isEmpty
+          ? null
+          : DateTime.parse(record.getStringValue('expiresAt')),
+      allowMultiple: record.getBoolValue('allowMultiple'),
+      isAnonymous: record.getBoolValue('isAnonymous'),
     );
   }
 
-  Map<String, dynamic> toFirestore() {
+  Map<String, dynamic> toPocketBase() {
     return {
       'groupChatId': groupChatId,
       'question': question,
       'options': options,
       'votes': votes,
       'createdBy': createdBy,
-      'createdAt': Timestamp.fromDate(createdAt),
-      'expiresAt': expiresAt != null ? Timestamp.fromDate(expiresAt!) : null,
+      'createdAt': createdAt.toIso8601String(),
+      'expiresAt': expiresAt?.toIso8601String() ?? '',
       'allowMultiple': allowMultiple,
       'isAnonymous': isAnonymous,
     };

@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import '../models/user_model.dart';
-import '../services/auth_service.dart';
+import '../services/pocketbase_auth_service.dart';
 
 class AuthProvider with ChangeNotifier {
-  final AuthService _authService = AuthService();
+  final PocketBaseAuthService _authService = PocketBaseAuthService();
 
   UserModel? _currentUser;
   bool _isLoading = false;
@@ -18,13 +17,12 @@ class AuthProvider with ChangeNotifier {
   // Initialize auth state
   Future<void> initializeAuth() async {
     try {
-      User? firebaseUser = _authService.currentUser;
-      if (firebaseUser != null) {
-        _currentUser = await _authService.getUserData(firebaseUser.uid);
+      if (_authService.isAuthenticated && _authService.currentUserId != null) {
+        _currentUser = await _authService.getUserData(_authService.currentUserId!);
         notifyListeners();
       }
     } catch (e) {
-      // Handle Firebase initialization errors gracefully
+      // Handle PocketBase initialization errors gracefully
       print('Error initializing auth: $e');
       _currentUser = null;
       notifyListeners();
@@ -170,7 +168,7 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
-  // Reload current user data from Firestore
+  // Reload current user data from PocketBase
   Future<void> loadCurrentUser() async {
     if (_currentUser == null) return;
 

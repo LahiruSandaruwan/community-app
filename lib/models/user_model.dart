@@ -1,4 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:pocketbase/pocketbase.dart';
 
 class UserModel {
   final String id;
@@ -29,37 +29,42 @@ class UserModel {
     this.mutedGroupChatIds = const [],
   });
 
-  // Create UserModel from Firestore document
-  factory UserModel.fromFirestore(DocumentSnapshot doc) {
-    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+  // Create UserModel from PocketBase record
+  factory UserModel.fromPocketBase(RecordModel record) {
     return UserModel(
-      id: doc.id,
-      email: data['email'] ?? '',
-      name: data['name'] ?? '',
-      role: data['role'] ?? 'student',
-      profilePictureUrl: data['profilePictureUrl'],
-      phoneNumber: data['phoneNumber'],
-      createdAt: (data['createdAt'] as Timestamp).toDate(),
-      lastSeen: (data['lastSeen'] as Timestamp).toDate(),
-      isOnline: data['isOnline'] ?? false,
-      fcmToken: data['fcmToken'],
-      communityIds: List<String>.from(data['communityIds'] ?? []),
-      mutedGroupChatIds: List<String>.from(data['mutedGroupChatIds'] ?? []),
+      id: record.id,
+      email: record.getStringValue('email'),
+      name: record.getStringValue('name'),
+      role: record.getStringValue('role', 'student'),
+      profilePictureUrl: record.getStringValue('profilePictureUrl', '').isEmpty
+          ? null
+          : record.getStringValue('profilePictureUrl'),
+      phoneNumber: record.getStringValue('phoneNumber', '').isEmpty
+          ? null
+          : record.getStringValue('phoneNumber'),
+      createdAt: DateTime.parse(record.getStringValue('createdAt', DateTime.now().toIso8601String())),
+      lastSeen: DateTime.parse(record.getStringValue('lastSeen', DateTime.now().toIso8601String())),
+      isOnline: record.getBoolValue('isOnline'),
+      fcmToken: record.getStringValue('fcmToken', '').isEmpty
+          ? null
+          : record.getStringValue('fcmToken'),
+      communityIds: record.getListValue<String>('communityIds'),
+      mutedGroupChatIds: record.getListValue<String>('mutedGroupChatIds'),
     );
   }
 
-  // Convert UserModel to Firestore document
-  Map<String, dynamic> toFirestore() {
+  // Convert UserModel to PocketBase record data
+  Map<String, dynamic> toPocketBase() {
     return {
       'email': email,
       'name': name,
       'role': role,
-      'profilePictureUrl': profilePictureUrl,
-      'phoneNumber': phoneNumber,
-      'createdAt': Timestamp.fromDate(createdAt),
-      'lastSeen': Timestamp.fromDate(lastSeen),
+      'profilePictureUrl': profilePictureUrl ?? '',
+      'phoneNumber': phoneNumber ?? '',
+      'createdAt': createdAt.toIso8601String(),
+      'lastSeen': lastSeen.toIso8601String(),
       'isOnline': isOnline,
-      'fcmToken': fcmToken,
+      'fcmToken': fcmToken ?? '',
       'communityIds': communityIds,
       'mutedGroupChatIds': mutedGroupChatIds,
     };

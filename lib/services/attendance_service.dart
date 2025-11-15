@@ -1,21 +1,65 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:pocketbase/pocketbase.dart';
 import '../models/attendance_model.dart';
+import 'pocketbase_service.dart';
+import 'dart:async';
 
 class AttendanceService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final PocketBase _pb = PocketBaseService().client;
+
+  // Store active subscriptions for cleanup
+  final Map<String, StreamController<List<AttendanceModel>>> _sessionStreams = {};
+  final Map<String, Timer> _pollingTimers = {};
 
   // Get sessions stream for a group chat
   Stream<List<AttendanceModel>> getSessions(String groupChatId) {
-    return _firestore
-        .collection('attendance')
-        .where('groupChatId', isEqualTo: groupChatId)
-        .orderBy('startTime', descending: true)
-        .snapshots()
-        .map((snapshot) {
-      return snapshot.docs
-          .map((doc) => AttendanceModel.fromMap(doc.data(), doc.id))
-          .toList();
-    });
+    final streamKey = 'sessions_$groupChatId';
+
+    // Return existing stream if already active
+    if (_sessionStreams.containsKey(streamKey)) {
+      return _sessionStreams[streamKey]!.stream;
+    }
+
+    // Create new stream controller
+    final controller = StreamController<List<AttendanceModel>>.broadcast(
+      onCancel: () {
+        _pollingTimers[streamKey]?.cancel();
+        _pollingTimers.remove(streamKey);
+        _sessionStreams.remove(streamKey);
+      },
+    );
+
+    _sessionStreams[streamKey] = controller;
+
+    // Fetch and emit data periodically
+    void fetchData() async {
+      try {
+        final records = await _pb.collection('attendance').getFullList(
+          filter: 'groupChatId = "$groupChatId"',
+          sort: '-startTime',
+        );
+
+        if (!controller.isClosed) {
+          controller.add(
+            records.map((record) => AttendanceModel.fromPocketBase(record)).toList()
+          );
+        }
+      } catch (e) {
+        if (!controller.isClosed) {
+          controller.addError('Failed to fetch sessions: $e');
+        }
+      }
+    }
+
+    // Initial fetch
+    fetchData();
+
+    // Poll every 3 seconds
+    _pollingTimers[streamKey] = Timer.periodic(
+      const Duration(seconds: 3),
+      (_) => fetchData(),
+    );
+
+    return controller.stream;
   }
 
   // Create a new attendance session
@@ -25,17 +69,23 @@ class AttendanceService {
     required String createdBy,
   }) async {
     try {
-      final docRef = await _firestore.collection('attendance').add({
+      final now = DateTime.now();
+
+      final sessionData = {
         'groupChatId': groupChatId,
         'sessionName': sessionName,
         'createdBy': createdBy,
-        'startTime': FieldValue.serverTimestamp(),
+        'startTime': now.toIso8601String(),
         'endTime': null,
         'presentUserIds': [],
         'lateUserIds': [],
-      });
+      };
 
-      return docRef.id;
+      final record = await _pb.collection('attendance').create(body: sessionData);
+
+      return record.id;
+    } on ClientException catch (e) {
+      throw Exception('Failed to create session: ${e.response['message'] ?? e.toString()}');
     } catch (e) {
       throw Exception('Failed to create session: $e');
     }
@@ -48,17 +98,31 @@ class AttendanceService {
     bool isLate = false,
   }) async {
     try {
-      final docRef = _firestore.collection('attendance').doc(sessionId);
+      // Get current session
+      final session = await _pb.collection('attendance').getOne(sessionId);
 
+      // Update appropriate array
       if (isLate) {
-        await docRef.update({
-          'lateUserIds': FieldValue.arrayUnion([userId]),
-        });
+        final lateUserIds = List<String>.from(session.data['lateUserIds'] ?? []);
+        if (!lateUserIds.contains(userId)) {
+          lateUserIds.add(userId);
+          await _pb.collection('attendance').update(
+            sessionId,
+            body: {'lateUserIds': lateUserIds},
+          );
+        }
       } else {
-        await docRef.update({
-          'presentUserIds': FieldValue.arrayUnion([userId]),
-        });
+        final presentUserIds = List<String>.from(session.data['presentUserIds'] ?? []);
+        if (!presentUserIds.contains(userId)) {
+          presentUserIds.add(userId);
+          await _pb.collection('attendance').update(
+            sessionId,
+            body: {'presentUserIds': presentUserIds},
+          );
+        }
       }
+    } on ClientException catch (e) {
+      throw Exception('Failed to mark attendance: ${e.response['message'] ?? e.toString()}');
     } catch (e) {
       throw Exception('Failed to mark attendance: $e');
     }
@@ -67,9 +131,12 @@ class AttendanceService {
   // End an attendance session
   Future<void> endSession(String sessionId) async {
     try {
-      await _firestore.collection('attendance').doc(sessionId).update({
-        'endTime': FieldValue.serverTimestamp(),
-      });
+      await _pb.collection('attendance').update(
+        sessionId,
+        body: {'endTime': DateTime.now().toIso8601String()},
+      );
+    } on ClientException catch (e) {
+      throw Exception('Failed to end session: ${e.response['message'] ?? e.toString()}');
     } catch (e) {
       throw Exception('Failed to end session: $e');
     }
@@ -78,11 +145,13 @@ class AttendanceService {
   // Get a single session
   Future<AttendanceModel?> getSession(String sessionId) async {
     try {
-      final doc = await _firestore.collection('attendance').doc(sessionId).get();
-
-      if (!doc.exists) return null;
-
-      return AttendanceModel.fromMap(doc.data()!, doc.id);
+      final record = await _pb.collection('attendance').getOne(sessionId);
+      return AttendanceModel.fromPocketBase(record);
+    } on ClientException catch (e) {
+      if (e.statusCode == 404) {
+        return null;
+      }
+      throw Exception('Failed to get session: ${e.response['message'] ?? e.toString()}');
     } catch (e) {
       throw Exception('Failed to get session: $e');
     }
@@ -91,7 +160,9 @@ class AttendanceService {
   // Delete a session (optional - for cleanup)
   Future<void> deleteSession(String sessionId) async {
     try {
-      await _firestore.collection('attendance').doc(sessionId).delete();
+      await _pb.collection('attendance').delete(sessionId);
+    } on ClientException catch (e) {
+      throw Exception('Failed to delete session: ${e.response['message'] ?? e.toString()}');
     } catch (e) {
       throw Exception('Failed to delete session: $e');
     }
@@ -103,17 +174,16 @@ class AttendanceService {
     required String userId,
   }) async {
     try {
-      final snapshot = await _firestore
-          .collection('attendance')
-          .where('groupChatId', isEqualTo: groupChatId)
-          .get();
+      final records = await _pb.collection('attendance').getFullList(
+        filter: 'groupChatId = "$groupChatId"',
+      );
 
       int present = 0;
       int late = 0;
       int absent = 0;
 
-      for (var doc in snapshot.docs) {
-        final session = AttendanceModel.fromMap(doc.data(), doc.id);
+      for (var record in records) {
+        final session = AttendanceModel.fromPocketBase(record);
 
         if (session.presentUserIds.contains(userId)) {
           present++;
@@ -128,10 +198,24 @@ class AttendanceService {
         'present': present,
         'late': late,
         'absent': absent,
-        'total': snapshot.docs.length,
+        'total': records.length,
       };
+    } on ClientException catch (e) {
+      throw Exception('Failed to get attendance stats: ${e.response['message'] ?? e.toString()}');
     } catch (e) {
       throw Exception('Failed to get attendance stats: $e');
     }
+  }
+
+  // Cleanup resources
+  void dispose() {
+    for (var timer in _pollingTimers.values) {
+      timer.cancel();
+    }
+    for (var controller in _sessionStreams.values) {
+      controller.close();
+    }
+    _pollingTimers.clear();
+    _sessionStreams.clear();
   }
 }

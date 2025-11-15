@@ -1,4 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:pocketbase/pocketbase.dart';
 import 'message_model.dart';
 
 class BookmarkModel {
@@ -18,27 +18,25 @@ class BookmarkModel {
     this.note,
   });
 
-  factory BookmarkModel.fromFirestore(DocumentSnapshot doc) {
-    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+  factory BookmarkModel.fromPocketBase(RecordModel record, MessageModel message) {
     return BookmarkModel(
-      id: doc.id,
-      userId: data['userId'] ?? '',
-      messageId: data['messageId'] ?? '',
-      message: MessageModel.fromFirestore(
-        // This will be fetched separately in the service
-        doc,
-      ),
-      bookmarkedAt: (data['bookmarkedAt'] as Timestamp).toDate(),
-      note: data['note'],
+      id: record.id,
+      userId: record.getStringValue('userId'),
+      messageId: record.getStringValue('messageId'),
+      message: message, // This will be fetched separately in the service
+      bookmarkedAt: DateTime.parse(record.getStringValue('bookmarkedAt', DateTime.now().toIso8601String())),
+      note: record.getStringValue('note', '').isEmpty
+          ? null
+          : record.getStringValue('note'),
     );
   }
 
-  Map<String, dynamic> toFirestore() {
+  Map<String, dynamic> toPocketBase() {
     return {
       'userId': userId,
       'messageId': messageId,
-      'bookmarkedAt': Timestamp.fromDate(bookmarkedAt),
-      'note': note,
+      'bookmarkedAt': bookmarkedAt.toIso8601String(),
+      'note': note ?? '',
     };
   }
 }

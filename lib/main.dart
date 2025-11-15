@@ -1,8 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
-import 'firebase_options.dart';
 import 'providers/auth_provider.dart';
 import 'providers/community_provider.dart';
 import 'providers/chat_provider.dart';
@@ -17,31 +14,11 @@ import 'screens/auth/login_screen.dart';
 import 'screens/home_screen.dart';
 import 'utils/theme.dart';
 
-// Background message handler for FCM
-// Note: Firebase is already initialized in main(), so no need to initialize here
-Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  print('Handling background message: ${message.messageId}');
-  // Handle the background notification here
-  // You can update local storage, show local notification, etc.
-}
-
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize Firebase only if not already initialized
-  try {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
-  } catch (e) {
-    // Firebase already initialized, safe to ignore
-    if (!e.toString().contains('duplicate-app')) {
-      rethrow; // Re-throw if it's a different error
-    }
-  }
-
-  // Initialize Firebase Cloud Messaging
-  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  // PocketBase initialization is handled in PocketBaseService singleton
+  // No separate initialization needed
 
   runApp(const EduConnectApp());
 }

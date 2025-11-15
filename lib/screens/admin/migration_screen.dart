@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
-import '../../utils/firestore_migration.dart';
+// Migration functionality disabled - using PocketBase now
+// import '../../utils/firestore_migration.dart';
 import '../../utils/theme.dart';
 
-/// Admin screen to run Firestore migrations
-/// Add this to your app temporarily to run migrations on existing data
+/// Admin screen to run database migrations
+/// DEPRECATED: Migration functionality disabled after moving to PocketBase
 class MigrationScreen extends StatefulWidget {
   const MigrationScreen({Key? key}) : super(key: key);
 
@@ -13,16 +14,35 @@ class MigrationScreen extends StatefulWidget {
 
 class _MigrationScreenState extends State<MigrationScreen> {
   bool _isRunning = false;
-  String _status = 'Ready to run migrations';
+  String _status = 'Migration feature disabled (moved to PocketBase)';
   bool _completed = false;
 
   Future<void> _runMigrations() async {
     setState(() {
       _isRunning = true;
-      _status = 'Running migrations...';
+      _status = 'Migration feature is disabled...';
       _completed = false;
     });
 
+    // Migration functionality disabled - using PocketBase now
+    await Future.delayed(const Duration(seconds: 1));
+
+    setState(() {
+      _isRunning = false;
+      _status = 'Migration feature is no longer available (app uses PocketBase)';
+      _completed = false;
+    });
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Migration feature disabled - app now uses PocketBase'),
+        backgroundColor: AppTheme.warningColor,
+      ),
+    );
+
+    /* ORIGINAL FIRESTORE MIGRATION CODE (DISABLED)
     try {
       await FirestoreMigration.runAllMigrations();
 
@@ -47,6 +67,7 @@ class _MigrationScreenState extends State<MigrationScreen> {
         ),
       );
     }
+    */
   }
 
   @override
@@ -110,11 +131,11 @@ class _MigrationScreenState extends State<MigrationScreen> {
                       ),
                     ),
                     SizedBox(height: 12),
-                    Text('• Adds mutedGroupChatIds field to all existing users'),
+                    Text('• Migration feature disabled'),
                     SizedBox(height: 8),
-                    Text('• Safe to run multiple times (won\'t duplicate data)'),
+                    Text('• App now uses PocketBase instead of Firestore'),
                     SizedBox(height: 8),
-                    Text('• Required if you have login errors'),
+                    Text('• This screen is kept for reference only'),
                   ],
                 ),
               ),

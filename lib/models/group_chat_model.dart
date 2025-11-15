@@ -1,4 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:pocketbase/pocketbase.dart';
 
 class GroupChatModel {
   final String id;
@@ -35,45 +35,48 @@ class GroupChatModel {
     this.isActive = true,
   });
 
-  // Create GroupChatModel from Firestore document
-  factory GroupChatModel.fromFirestore(DocumentSnapshot doc) {
-    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+  // Create GroupChatModel from PocketBase record
+  factory GroupChatModel.fromPocketBase(RecordModel record) {
+    final lastMessageAtStr = record.getStringValue('lastMessageAt', '');
     return GroupChatModel(
-      id: doc.id,
-      name: data['name'] ?? '',
-      description: data['description'] ?? '',
-      communityId: data['communityId'] ?? '',
-      createdBy: data['createdBy'] ?? '',
-      createdAt: (data['createdAt'] as Timestamp).toDate(),
-      groupImageUrl: data['groupImageUrl'],
-      memberIds: List<String>.from(data['memberIds'] ?? []),
-      isAnnouncementOnly: data['isAnnouncementOnly'] ?? false,
-      lastMessageAt: data['lastMessageAt'] != null
-          ? (data['lastMessageAt'] as Timestamp).toDate()
-          : null,
-      lastMessage: data['lastMessage'],
-      lastMessageSenderId: data['lastMessageSenderId'],
-      unreadCounts: Map<String, int>.from(data['unreadCounts'] ?? {}),
-      pinnedMessageIds: List<String>.from(data['pinnedMessageIds'] ?? []),
-      isActive: data['isActive'] ?? true,
+      id: record.id,
+      name: record.getStringValue('name'),
+      description: record.getStringValue('description'),
+      communityId: record.getStringValue('communityId'),
+      createdBy: record.getStringValue('createdBy'),
+      createdAt: DateTime.parse(record.getStringValue('createdAt', DateTime.now().toIso8601String())),
+      groupImageUrl: record.getStringValue('groupImageUrl', '').isEmpty
+          ? null
+          : record.getStringValue('groupImageUrl'),
+      memberIds: record.getListValue<String>('memberIds'),
+      isAnnouncementOnly: record.getBoolValue('isAnnouncementOnly'),
+      lastMessageAt: lastMessageAtStr.isEmpty ? null : DateTime.parse(lastMessageAtStr),
+      lastMessage: record.getStringValue('lastMessage', '').isEmpty
+          ? null
+          : record.getStringValue('lastMessage'),
+      lastMessageSenderId: record.getStringValue('lastMessageSenderId', '').isEmpty
+          ? null
+          : record.getStringValue('lastMessageSenderId'),
+      unreadCounts: Map<String, int>.from(record.data['unreadCounts'] ?? {}),
+      pinnedMessageIds: record.getListValue<String>('pinnedMessageIds'),
+      isActive: record.getBoolValue('isActive', true),
     );
   }
 
-  // Convert GroupChatModel to Firestore document
-  Map<String, dynamic> toFirestore() {
+  // Convert GroupChatModel to PocketBase record data
+  Map<String, dynamic> toPocketBase() {
     return {
       'name': name,
       'description': description,
       'communityId': communityId,
       'createdBy': createdBy,
-      'createdAt': Timestamp.fromDate(createdAt),
-      'groupImageUrl': groupImageUrl,
+      'createdAt': createdAt.toIso8601String(),
+      'groupImageUrl': groupImageUrl ?? '',
       'memberIds': memberIds,
       'isAnnouncementOnly': isAnnouncementOnly,
-      'lastMessageAt':
-          lastMessageAt != null ? Timestamp.fromDate(lastMessageAt!) : null,
-      'lastMessage': lastMessage,
-      'lastMessageSenderId': lastMessageSenderId,
+      'lastMessageAt': lastMessageAt?.toIso8601String() ?? '',
+      'lastMessage': lastMessage ?? '',
+      'lastMessageSenderId': lastMessageSenderId ?? '',
       'unreadCounts': unreadCounts,
       'pinnedMessageIds': pinnedMessageIds,
       'isActive': isActive,

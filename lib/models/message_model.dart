@@ -1,4 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:pocketbase/pocketbase.dart';
 
 class MessageModel {
   final String id;
@@ -31,49 +31,51 @@ class MessageModel {
     this.reactions = const {},
   });
 
-  // Create MessageModel from Firestore document
-  factory MessageModel.fromFirestore(DocumentSnapshot doc) {
-    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
-
+  // Create MessageModel from PocketBase record
+  factory MessageModel.fromPocketBase(RecordModel record) {
     // Parse reactions
     Map<String, List<String>> reactions = {};
-    if (data['reactions'] != null) {
-      final reactionsData = data['reactions'] as Map<String, dynamic>;
+    if (record.data['reactions'] != null) {
+      final reactionsData = record.data['reactions'] as Map<String, dynamic>;
       reactionsData.forEach((emoji, userIds) {
         reactions[emoji] = List<String>.from(userIds ?? []);
       });
     }
 
     return MessageModel(
-      id: doc.id,
-      groupChatId: data['groupChatId'] ?? '',
-      senderId: data['senderId'] ?? '',
-      senderName: data['senderName'] ?? '',
-      senderProfileUrl: data['senderProfileUrl'],
-      content: data['content'] ?? '',
-      messageType: data['messageType'] ?? 'text',
-      timestamp: (data['timestamp'] as Timestamp).toDate(),
-      readBy: List<String>.from(data['readBy'] ?? []),
-      isPinned: data['isPinned'] ?? false,
-      replyToMessageId: data['replyToMessageId'],
-      metadata: data['metadata'],
+      id: record.id,
+      groupChatId: record.getStringValue('groupChatId'),
+      senderId: record.getStringValue('senderId'),
+      senderName: record.getStringValue('senderName'),
+      senderProfileUrl: record.getStringValue('senderProfileUrl', '').isEmpty
+          ? null
+          : record.getStringValue('senderProfileUrl'),
+      content: record.getStringValue('content'),
+      messageType: record.getStringValue('messageType', 'text'),
+      timestamp: DateTime.parse(record.getStringValue('timestamp', DateTime.now().toIso8601String())),
+      readBy: record.getListValue<String>('readBy'),
+      isPinned: record.getBoolValue('isPinned'),
+      replyToMessageId: record.getStringValue('replyToMessageId', '').isEmpty
+          ? null
+          : record.getStringValue('replyToMessageId'),
+      metadata: record.data['metadata'] as Map<String, dynamic>?,
       reactions: reactions,
     );
   }
 
-  // Convert MessageModel to Firestore document
-  Map<String, dynamic> toFirestore() {
+  // Convert MessageModel to PocketBase record data
+  Map<String, dynamic> toPocketBase() {
     return {
       'groupChatId': groupChatId,
       'senderId': senderId,
       'senderName': senderName,
-      'senderProfileUrl': senderProfileUrl,
+      'senderProfileUrl': senderProfileUrl ?? '',
       'content': content,
       'messageType': messageType,
-      'timestamp': Timestamp.fromDate(timestamp),
+      'timestamp': timestamp.toIso8601String(),
       'readBy': readBy,
       'isPinned': isPinned,
-      'replyToMessageId': replyToMessageId,
+      'replyToMessageId': replyToMessageId ?? '',
       'metadata': metadata,
       'reactions': reactions,
     };

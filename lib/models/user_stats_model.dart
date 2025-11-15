@@ -1,4 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:pocketbase/pocketbase.dart';
 
 class UserStatsModel {
   final String userId;
@@ -21,30 +21,37 @@ class UserStatsModel {
     this.activityCounts = const {},
   });
 
-  factory UserStatsModel.fromFirestore(DocumentSnapshot doc) {
-    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+  factory UserStatsModel.fromPocketBase(RecordModel record) {
+    // Parse activityCounts from JSON
+    Map<String, int> activityCounts = {};
+    final activityData = record.data['activityCounts'];
+    if (activityData != null && activityData is Map) {
+      activityData.forEach((key, value) {
+        if (value is int) {
+          activityCounts[key.toString()] = value;
+        }
+      });
+    }
 
     return UserStatsModel(
-      userId: doc.id,
-      currentStreak: data['currentStreak'] ?? 0,
-      longestStreak: data['longestStreak'] ?? 0,
-      lastActiveDate: data['lastActiveDate'] != null
-          ? (data['lastActiveDate'] as Timestamp).toDate()
-          : null,
-      totalPoints: data['totalPoints'] ?? 0,
-      level: data['level'] ?? 1,
-      badges: List<String>.from(data['badges'] ?? []),
-      activityCounts: Map<String, int>.from(data['activityCounts'] ?? {}),
+      userId: record.id,
+      currentStreak: record.getIntValue('currentStreak'),
+      longestStreak: record.getIntValue('longestStreak'),
+      lastActiveDate: record.getStringValue('lastActiveDate', '').isEmpty
+          ? null
+          : DateTime.parse(record.getStringValue('lastActiveDate')),
+      totalPoints: record.getIntValue('totalPoints'),
+      level: record.getIntValue('level', 1),
+      badges: record.getListValue<String>('badges'),
+      activityCounts: activityCounts,
     );
   }
 
-  Map<String, dynamic> toFirestore() {
+  Map<String, dynamic> toPocketBase() {
     return {
       'currentStreak': currentStreak,
       'longestStreak': longestStreak,
-      'lastActiveDate': lastActiveDate != null
-          ? Timestamp.fromDate(lastActiveDate!)
-          : null,
+      'lastActiveDate': lastActiveDate?.toIso8601String() ?? '',
       'totalPoints': totalPoints,
       'level': level,
       'badges': badges,
@@ -54,55 +61,4 @@ class UserStatsModel {
 
   int get pointsToNextLevel => (level * 100);
   double get progressToNextLevel => (totalPoints % pointsToNextLevel) / pointsToNextLevel;
-}
-
-class AttendanceModel {
-  final String id;
-  final String groupChatId;
-  final String sessionName;
-  final DateTime startTime;
-  final DateTime? endTime;
-  final List<String> presentUserIds;
-  final List<String> lateUserIds;
-  final String createdBy;
-
-  AttendanceModel({
-    required this.id,
-    required this.groupChatId,
-    required this.sessionName,
-    required this.startTime,
-    this.endTime,
-    this.presentUserIds = const [],
-    this.lateUserIds = const [],
-    required this.createdBy,
-  });
-
-  factory AttendanceModel.fromFirestore(DocumentSnapshot doc) {
-    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
-
-    return AttendanceModel(
-      id: doc.id,
-      groupChatId: data['groupChatId'] ?? '',
-      sessionName: data['sessionName'] ?? '',
-      startTime: (data['startTime'] as Timestamp).toDate(),
-      endTime: data['endTime'] != null
-          ? (data['endTime'] as Timestamp).toDate()
-          : null,
-      presentUserIds: List<String>.from(data['presentUserIds'] ?? []),
-      lateUserIds: List<String>.from(data['lateUserIds'] ?? []),
-      createdBy: data['createdBy'] ?? '',
-    );
-  }
-
-  Map<String, dynamic> toFirestore() {
-    return {
-      'groupChatId': groupChatId,
-      'sessionName': sessionName,
-      'startTime': Timestamp.fromDate(startTime),
-      'endTime': endTime != null ? Timestamp.fromDate(endTime!) : null,
-      'presentUserIds': presentUserIds,
-      'lateUserIds': lateUserIds,
-      'createdBy': createdBy,
-    };
-  }
 }

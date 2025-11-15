@@ -1,10 +1,16 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:pocketbase/pocketbase.dart';
 import '../models/message_model.dart';
 import '../models/user_model.dart';
 import '../utils/constants.dart';
+import 'pocketbase_service.dart';
+import 'dart:async';
 
 class ChatService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final PocketBase _pb = PocketBaseService().client;
+
+  // Store active subscriptions for cleanup
+  final Map<String, StreamController<List<MessageModel>>> _messageStreams = {};
+  final Map<String, StreamController<List<String>>> _typingStreams = {};
 
   // Send a message
   Future<MessageModel> sendMessage({
@@ -18,27 +24,26 @@ class ChatService {
     Map<String, dynamic>? metadata,
   }) async {
     try {
-      DocumentReference messageRef = _firestore
-          .collection(AppConstants.groupChatsCollection)
-          .doc(groupChatId)
-          .collection(AppConstants.messagesCollection)
-          .doc();
+      final now = DateTime.now();
 
-      MessageModel message = MessageModel(
-        id: messageRef.id,
-        groupChatId: groupChatId,
-        senderId: senderId,
-        senderName: senderName,
-        senderProfileUrl: senderProfileUrl,
-        content: content,
-        messageType: messageType,
-        timestamp: DateTime.now(),
-        readBy: [senderId], // Sender has read the message
-        replyToMessageId: replyToMessageId,
-        metadata: metadata,
+      final messageData = {
+        'groupChatId': groupChatId,
+        'senderId': senderId,
+        'senderName': senderName,
+        'senderProfileUrl': senderProfileUrl ?? '',
+        'content': content,
+        'messageType': messageType,
+        'timestamp': now.toIso8601String(),
+        'readBy': [senderId], // Sender has read the message
+        'isPinned': false,
+        'replyToMessageId': replyToMessageId ?? '',
+        'metadata': metadata,
+        'reactions': {},
+      };
+
+      final record = await _pb.collection(AppConstants.messagesCollection).create(
+        body: messageData,
       );
-
-      await messageRef.set(message.toFirestore());
 
       // Update group chat's last message
       await _updateGroupChatLastMessage(
@@ -47,7 +52,9 @@ class ChatService {
         lastMessageSenderId: senderId,
       );
 
-      return message;
+      return MessageModel.fromPocketBase(record);
+    } on ClientException catch (e) {
+      throw 'Failed to send message: ${e.response}';
     } catch (e) {
       throw 'Failed to send message: $e';
     }
@@ -58,16 +65,60 @@ class ChatService {
     required String groupChatId,
     int limit = 50,
   }) {
-    return _firestore
-        .collection(AppConstants.groupChatsCollection)
-        .doc(groupChatId)
-        .collection(AppConstants.messagesCollection)
-        .orderBy('timestamp', descending: true)
-        .limit(limit)
-        .snapshots()
-        .map((snapshot) => snapshot.docs
-            .map((doc) => MessageModel.fromFirestore(doc))
-            .toList());
+    // Create or reuse stream controller for this group chat
+    final streamKey = 'messages_$groupChatId';
+
+    if (!_messageStreams.containsKey(streamKey)) {
+      final controller = StreamController<List<MessageModel>>.broadcast(
+        onCancel: () {
+          _messageStreams.remove(streamKey);
+        },
+      );
+      _messageStreams[streamKey] = controller;
+
+      // Initial fetch
+      _fetchAndEmitMessages(groupChatId, limit, controller);
+
+      // Subscribe to real-time updates
+      _pb.collection(AppConstants.messagesCollection).subscribe(
+        '*',
+        (e) {
+          // Refetch messages when any change occurs
+          _fetchAndEmitMessages(groupChatId, limit, controller);
+        },
+        filter: 'groupChatId = "$groupChatId"',
+      );
+    }
+
+    return _messageStreams[streamKey]!.stream;
+  }
+
+  // Helper method to fetch and emit messages
+  Future<void> _fetchAndEmitMessages(
+    String groupChatId,
+    int limit,
+    StreamController<List<MessageModel>> controller,
+  ) async {
+    try {
+      final records = await _pb.collection(AppConstants.messagesCollection).getList(
+        page: 1,
+        perPage: limit,
+        sort: '-timestamp',
+        filter: 'groupChatId = "$groupChatId"',
+      );
+
+      final messages = records.items
+          .map((record) => MessageModel.fromPocketBase(record))
+          .toList();
+
+      if (!controller.isClosed) {
+        controller.add(messages);
+      }
+    } catch (e) {
+      if (!controller.isClosed) {
+        controller.addError(e);
+      }
+    }
   }
 
   // Mark message as read
@@ -77,14 +128,19 @@ class ChatService {
     required String userId,
   }) async {
     try {
-      await _firestore
-          .collection(AppConstants.groupChatsCollection)
-          .doc(groupChatId)
-          .collection(AppConstants.messagesCollection)
-          .doc(messageId)
-          .update({
-        'readBy': FieldValue.arrayUnion([userId]),
-      });
+      // Fetch current message
+      final message = await _pb.collection(AppConstants.messagesCollection).getOne(messageId);
+      final readBy = List<String>.from(message.data['readBy'] ?? []);
+
+      // Add userId if not already present
+      if (!readBy.contains(userId)) {
+        readBy.add(userId);
+
+        await _pb.collection(AppConstants.messagesCollection).update(
+          messageId,
+          body: {'readBy': readBy},
+        );
+      }
     } catch (e) {
       // Silently fail - not critical
       print('Failed to mark message as read: $e');
@@ -97,31 +153,39 @@ class ChatService {
     required String userId,
   }) async {
     try {
-      // Get unread messages
-      QuerySnapshot unreadMessages = await _firestore
-          .collection(AppConstants.groupChatsCollection)
-          .doc(groupChatId)
-          .collection(AppConstants.messagesCollection)
-          .where('readBy', whereNotIn: [
-        [userId]
-      ]).get();
+      // Get all messages in the group chat
+      final messages = await _pb.collection(AppConstants.messagesCollection).getFullList(
+        filter: 'groupChatId = "$groupChatId"',
+      );
 
-      // Mark each as read
-      WriteBatch batch = _firestore.batch();
-      for (var doc in unreadMessages.docs) {
-        batch.update(doc.reference, {
-          'readBy': FieldValue.arrayUnion([userId]),
-        });
+      // Update each message that hasn't been read by this user
+      for (var messageRecord in messages) {
+        final readBy = List<String>.from(messageRecord.data['readBy'] ?? []);
+
+        if (!readBy.contains(userId)) {
+          readBy.add(userId);
+
+          await _pb.collection(AppConstants.messagesCollection).update(
+            messageRecord.id,
+            body: {'readBy': readBy},
+          );
+        }
       }
-      await batch.commit();
 
-      // Reset unread count for user
-      await _firestore
-          .collection(AppConstants.groupChatsCollection)
-          .doc(groupChatId)
-          .update({
-        'unreadCounts.$userId': 0,
-      });
+      // Reset unread count for user in group chat
+      try {
+        final groupChat = await _pb.collection(AppConstants.groupChatsCollection).getOne(groupChatId);
+        final unreadCounts = Map<String, dynamic>.from(groupChat.data['unreadCounts'] ?? {});
+        unreadCounts[userId] = 0;
+
+        await _pb.collection(AppConstants.groupChatsCollection).update(
+          groupChatId,
+          body: {'unreadCounts': unreadCounts},
+        );
+      } catch (e) {
+        // Silently fail if group chat doesn't exist or unreadCounts field is missing
+        print('Failed to reset unread count: $e');
+      }
     } catch (e) {
       print('Failed to mark all messages as read: $e');
     }
@@ -135,22 +199,29 @@ class ChatService {
   }) async {
     try {
       // Update message pin status
-      await _firestore
-          .collection(AppConstants.groupChatsCollection)
-          .doc(groupChatId)
-          .collection(AppConstants.messagesCollection)
-          .doc(messageId)
-          .update({'isPinned': pin});
+      await _pb.collection(AppConstants.messagesCollection).update(
+        messageId,
+        body: {'isPinned': pin},
+      );
 
       // Update group chat's pinned messages list
-      await _firestore
-          .collection(AppConstants.groupChatsCollection)
-          .doc(groupChatId)
-          .update({
-        'pinnedMessageIds': pin
-            ? FieldValue.arrayUnion([messageId])
-            : FieldValue.arrayRemove([messageId]),
-      });
+      final groupChat = await _pb.collection(AppConstants.groupChatsCollection).getOne(groupChatId);
+      final pinnedMessageIds = List<String>.from(groupChat.data['pinnedMessageIds'] ?? []);
+
+      if (pin) {
+        if (!pinnedMessageIds.contains(messageId)) {
+          pinnedMessageIds.add(messageId);
+        }
+      } else {
+        pinnedMessageIds.remove(messageId);
+      }
+
+      await _pb.collection(AppConstants.groupChatsCollection).update(
+        groupChatId,
+        body: {'pinnedMessageIds': pinnedMessageIds},
+      );
+    } on ClientException catch (e) {
+      throw 'Failed to ${pin ? 'pin' : 'unpin'} message: ${e.response}';
     } catch (e) {
       throw 'Failed to ${pin ? 'pin' : 'unpin'} message: $e';
     }
@@ -159,17 +230,16 @@ class ChatService {
   // Get pinned messages
   Future<List<MessageModel>> getPinnedMessages(String groupChatId) async {
     try {
-      QuerySnapshot snapshot = await _firestore
-          .collection(AppConstants.groupChatsCollection)
-          .doc(groupChatId)
-          .collection(AppConstants.messagesCollection)
-          .where('isPinned', isEqualTo: true)
-          .orderBy('timestamp', descending: true)
-          .get();
+      final records = await _pb.collection(AppConstants.messagesCollection).getFullList(
+        filter: 'groupChatId = "$groupChatId" && isPinned = true',
+        sort: '-timestamp',
+      );
 
-      return snapshot.docs
-          .map((doc) => MessageModel.fromFirestore(doc))
+      return records
+          .map((record) => MessageModel.fromPocketBase(record))
           .toList();
+    } on ClientException catch (e) {
+      throw 'Failed to get pinned messages: ${e.response}';
     } catch (e) {
       throw 'Failed to get pinned messages: $e';
     }
@@ -181,15 +251,18 @@ class ChatService {
     required String messageId,
   }) async {
     try {
-      await _firestore
-          .collection(AppConstants.groupChatsCollection)
-          .doc(groupChatId)
-          .collection(AppConstants.messagesCollection)
-          .doc(messageId)
-          .update({
-        'content': 'This message was deleted',
-        'metadata': {'deleted': true, 'deletedAt': FieldValue.serverTimestamp()},
-      });
+      await _pb.collection(AppConstants.messagesCollection).update(
+        messageId,
+        body: {
+          'content': 'This message was deleted',
+          'metadata': {
+            'deleted': true,
+            'deletedAt': DateTime.now().toIso8601String(),
+          },
+        },
+      );
+    } on ClientException catch (e) {
+      throw 'Failed to delete message: ${e.response}';
     } catch (e) {
       throw 'Failed to delete message: $e';
     }
@@ -202,20 +275,60 @@ class ChatService {
     required bool isTyping,
   }) async {
     try {
-      // Store typing status in a separate collection for real-time updates
-      DocumentReference typingRef = _firestore
-          .collection(AppConstants.groupChatsCollection)
-          .doc(groupChatId)
-          .collection('typing')
-          .doc(userId);
+      // Use a separate collection for typing indicators (since PocketBase doesn't support subcollections)
+      // Collection name: 'typing' with fields: groupChatId, userId, isTyping, timestamp
 
       if (isTyping) {
-        await typingRef.set({
-          'isTyping': true,
-          'timestamp': FieldValue.serverTimestamp(),
-        });
+        // Try to find existing typing record
+        try {
+          final existingRecords = await _pb.collection('typing').getFullList(
+            filter: 'groupChatId = "$groupChatId" && userId = "$userId"',
+          );
+
+          if (existingRecords.isNotEmpty) {
+            // Update existing record
+            await _pb.collection('typing').update(
+              existingRecords.first.id,
+              body: {
+                'isTyping': true,
+                'timestamp': DateTime.now().toIso8601String(),
+              },
+            );
+          } else {
+            // Create new record
+            await _pb.collection('typing').create(
+              body: {
+                'groupChatId': groupChatId,
+                'userId': userId,
+                'isTyping': true,
+                'timestamp': DateTime.now().toIso8601String(),
+              },
+            );
+          }
+        } catch (e) {
+          // If not found, create new
+          await _pb.collection('typing').create(
+            body: {
+              'groupChatId': groupChatId,
+              'userId': userId,
+              'isTyping': true,
+              'timestamp': DateTime.now().toIso8601String(),
+            },
+          );
+        }
       } else {
-        await typingRef.delete();
+        // Delete typing record
+        try {
+          final existingRecords = await _pb.collection('typing').getFullList(
+            filter: 'groupChatId = "$groupChatId" && userId = "$userId"',
+          );
+
+          for (var record in existingRecords) {
+            await _pb.collection('typing').delete(record.id);
+          }
+        } catch (e) {
+          // Ignore if not found
+        }
       }
     } catch (e) {
       // Silently fail - not critical
@@ -228,24 +341,57 @@ class ChatService {
     required String groupChatId,
     required String currentUserId,
   }) {
-    return _firestore
-        .collection(AppConstants.groupChatsCollection)
-        .doc(groupChatId)
-        .collection('typing')
-        .snapshots()
-        .map((snapshot) {
-      List<String> typingUserIds = [];
-      for (var doc in snapshot.docs) {
-        if (doc.id != currentUserId) {
-          // Exclude current user
-          Map<String, dynamic> data = doc.data();
-          if (data['isTyping'] == true) {
-            typingUserIds.add(doc.id);
-          }
-        }
+    // Create or reuse stream controller for typing indicators
+    final streamKey = 'typing_$groupChatId';
+
+    if (!_typingStreams.containsKey(streamKey)) {
+      final controller = StreamController<List<String>>.broadcast(
+        onCancel: () {
+          _typingStreams.remove(streamKey);
+        },
+      );
+      _typingStreams[streamKey] = controller;
+
+      // Initial fetch
+      _fetchAndEmitTypingUsers(groupChatId, currentUserId, controller);
+
+      // Subscribe to real-time updates
+      _pb.collection('typing').subscribe(
+        '*',
+        (e) {
+          _fetchAndEmitTypingUsers(groupChatId, currentUserId, controller);
+        },
+        filter: 'groupChatId = "$groupChatId"',
+      );
+    }
+
+    return _typingStreams[streamKey]!.stream;
+  }
+
+  // Helper method to fetch and emit typing users
+  Future<void> _fetchAndEmitTypingUsers(
+    String groupChatId,
+    String currentUserId,
+    StreamController<List<String>> controller,
+  ) async {
+    try {
+      final records = await _pb.collection('typing').getFullList(
+        filter: 'groupChatId = "$groupChatId" && isTyping = true',
+      );
+
+      final typingUserIds = records
+          .map((record) => record.getStringValue('userId'))
+          .where((userId) => userId != currentUserId) // Exclude current user
+          .toList();
+
+      if (!controller.isClosed) {
+        controller.add(typingUserIds);
       }
-      return typingUserIds;
-    });
+    } catch (e) {
+      if (!controller.isClosed) {
+        controller.addError(e);
+      }
+    }
   }
 
   // Get unread message count for a user in a group chat
@@ -254,16 +400,13 @@ class ChatService {
     required String userId,
   }) async {
     try {
-      QuerySnapshot snapshot = await _firestore
-          .collection(AppConstants.groupChatsCollection)
-          .doc(groupChatId)
-          .collection(AppConstants.messagesCollection)
-          .where('senderId', isNotEqualTo: userId)
-          .get();
+      final messages = await _pb.collection(AppConstants.messagesCollection).getFullList(
+        filter: 'groupChatId = "$groupChatId" && senderId != "$userId"',
+      );
 
       int unreadCount = 0;
-      for (var doc in snapshot.docs) {
-        MessageModel message = MessageModel.fromFirestore(doc);
+      for (var messageRecord in messages) {
+        final message = MessageModel.fromPocketBase(messageRecord);
         if (!message.isReadBy(userId)) {
           unreadCount++;
         }
@@ -282,16 +425,16 @@ class ChatService {
     required String lastMessageSenderId,
   }) async {
     try {
-      await _firestore
-          .collection(AppConstants.groupChatsCollection)
-          .doc(groupChatId)
-          .update({
-        'lastMessage': lastMessage.length > 50
-            ? '${lastMessage.substring(0, 50)}...'
-            : lastMessage,
-        'lastMessageAt': FieldValue.serverTimestamp(),
-        'lastMessageSenderId': lastMessageSenderId,
-      });
+      await _pb.collection(AppConstants.groupChatsCollection).update(
+        groupChatId,
+        body: {
+          'lastMessage': lastMessage.length > 50
+              ? '${lastMessage.substring(0, 50)}...'
+              : lastMessage,
+          'lastMessageAt': DateTime.now().toIso8601String(),
+          'lastMessageSenderId': lastMessageSenderId,
+        },
+      );
     } catch (e) {
       print('Failed to update last message: $e');
     }
@@ -303,25 +446,27 @@ class ChatService {
     required String query,
   }) async {
     try {
-      // Note: Firestore doesn't support full-text search natively
-      // This is a basic implementation that gets all messages and filters client-side
-      // For production, consider using Algolia or ElasticSearch
-      QuerySnapshot snapshot = await _firestore
-          .collection(AppConstants.groupChatsCollection)
-          .doc(groupChatId)
-          .collection(AppConstants.messagesCollection)
-          .orderBy('timestamp', descending: true)
-          .limit(500)
-          .get();
+      // Note: PocketBase supports limited text search
+      // This implementation gets messages and filters client-side
+      // For production, consider using full-text search or external search service
+      final records = await _pb.collection(AppConstants.messagesCollection).getList(
+        page: 1,
+        perPage: 500,
+        sort: '-timestamp',
+        filter: 'groupChatId = "$groupChatId"',
+      );
 
-      List<MessageModel> allMessages =
-          snapshot.docs.map((doc) => MessageModel.fromFirestore(doc)).toList();
+      final allMessages = records.items
+          .map((record) => MessageModel.fromPocketBase(record))
+          .toList();
 
       // Filter messages containing the query (case-insensitive)
       return allMessages
           .where((message) =>
               message.content.toLowerCase().contains(query.toLowerCase()))
           .toList();
+    } on ClientException catch (e) {
+      throw 'Failed to search messages: ${e.response}';
     } catch (e) {
       throw 'Failed to search messages: $e';
     }
@@ -335,35 +480,39 @@ class ChatService {
     required String emoji,
   }) async {
     try {
-      DocumentReference messageRef = _firestore
-          .collection(AppConstants.groupChatsCollection)
-          .doc(groupChatId)
-          .collection(AppConstants.messagesCollection)
-          .doc(messageId);
+      // Get the current message
+      final messageRecord = await _pb.collection(AppConstants.messagesCollection).getOne(messageId);
 
-      await _firestore.runTransaction((transaction) async {
-        DocumentSnapshot messageSnapshot = await transaction.get(messageRef);
+      if (messageRecord.id.isEmpty) {
+        throw 'Message not found';
+      }
 
-        if (!messageSnapshot.exists) {
-          throw 'Message not found';
+      // Get current reactions
+      Map<String, dynamic> reactions = Map<String, dynamic>.from(
+        messageRecord.data['reactions'] ?? {},
+      );
+
+      // Add user to the emoji's list
+      if (reactions.containsKey(emoji)) {
+        List<String> users = List<String>.from(reactions[emoji]);
+        if (!users.contains(userId)) {
+          users.add(userId);
+          reactions[emoji] = users;
         }
+      } else {
+        reactions[emoji] = [userId];
+      }
 
-        Map<String, dynamic> data = messageSnapshot.data() as Map<String, dynamic>;
-        Map<String, dynamic> reactions = Map<String, dynamic>.from(data['reactions'] ?? {});
-
-        // Add user to the emoji's list
-        if (reactions.containsKey(emoji)) {
-          List<String> users = List<String>.from(reactions[emoji]);
-          if (!users.contains(userId)) {
-            users.add(userId);
-            reactions[emoji] = users;
-          }
-        } else {
-          reactions[emoji] = [userId];
-        }
-
-        transaction.update(messageRef, {'reactions': reactions});
-      });
+      // Update message with new reactions
+      await _pb.collection(AppConstants.messagesCollection).update(
+        messageId,
+        body: {'reactions': reactions},
+      );
+    } on ClientException catch (e) {
+      if (e.statusCode == 404) {
+        throw 'Message not found';
+      }
+      throw 'Failed to add reaction: ${e.response}';
     } catch (e) {
       throw 'Failed to add reaction: $e';
     }
@@ -377,39 +526,60 @@ class ChatService {
     required String emoji,
   }) async {
     try {
-      DocumentReference messageRef = _firestore
-          .collection(AppConstants.groupChatsCollection)
-          .doc(groupChatId)
-          .collection(AppConstants.messagesCollection)
-          .doc(messageId);
+      // Get the current message
+      final messageRecord = await _pb.collection(AppConstants.messagesCollection).getOne(messageId);
 
-      await _firestore.runTransaction((transaction) async {
-        DocumentSnapshot messageSnapshot = await transaction.get(messageRef);
+      if (messageRecord.id.isEmpty) {
+        throw 'Message not found';
+      }
 
-        if (!messageSnapshot.exists) {
-          throw 'Message not found';
+      // Get current reactions
+      Map<String, dynamic> reactions = Map<String, dynamic>.from(
+        messageRecord.data['reactions'] ?? {},
+      );
+
+      // Remove user from the emoji's list
+      if (reactions.containsKey(emoji)) {
+        List<String> users = List<String>.from(reactions[emoji]);
+        users.remove(userId);
+
+        if (users.isEmpty) {
+          // Remove emoji if no users left
+          reactions.remove(emoji);
+        } else {
+          reactions[emoji] = users;
         }
+      }
 
-        Map<String, dynamic> data = messageSnapshot.data() as Map<String, dynamic>;
-        Map<String, dynamic> reactions = Map<String, dynamic>.from(data['reactions'] ?? {});
-
-        // Remove user from the emoji's list
-        if (reactions.containsKey(emoji)) {
-          List<String> users = List<String>.from(reactions[emoji]);
-          users.remove(userId);
-
-          if (users.isEmpty) {
-            // Remove emoji if no users left
-            reactions.remove(emoji);
-          } else {
-            reactions[emoji] = users;
-          }
-        }
-
-        transaction.update(messageRef, {'reactions': reactions});
-      });
+      // Update message with new reactions
+      await _pb.collection(AppConstants.messagesCollection).update(
+        messageId,
+        body: {'reactions': reactions},
+      );
+    } on ClientException catch (e) {
+      if (e.statusCode == 404) {
+        throw 'Message not found';
+      }
+      throw 'Failed to remove reaction: ${e.response}';
     } catch (e) {
       throw 'Failed to remove reaction: $e';
     }
+  }
+
+  // Cleanup method to dispose of stream controllers
+  void dispose() {
+    for (var controller in _messageStreams.values) {
+      controller.close();
+    }
+    _messageStreams.clear();
+
+    for (var controller in _typingStreams.values) {
+      controller.close();
+    }
+    _typingStreams.clear();
+
+    // Unsubscribe from all PocketBase subscriptions
+    _pb.collection(AppConstants.messagesCollection).unsubscribe('*');
+    _pb.collection('typing').unsubscribe('*');
   }
 }

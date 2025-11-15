@@ -1,8 +1,14 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:pocketbase/pocketbase.dart';
 import '../models/user_stats_model.dart';
+import 'pocketbase_service.dart';
+import 'dart:async';
 
 class GamificationService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final PocketBase _pb = PocketBaseService().client;
+
+  // Store active subscriptions for cleanup
+  final Map<String, StreamController<UserStatsModel?>> _statsStreams = {};
+  final Map<String, Timer> _pollingTimers = {};
 
   // Update user activity and award points
   Future<void> recordActivity({
@@ -11,26 +17,39 @@ class GamificationService {
     int points = 10,
   }) async {
     try {
-      final userStatsRef = _firestore.collection('userStats').doc(userId);
-      final doc = await userStatsRef.get();
+      // Try to get existing stats
+      RecordModel? statsRecord;
+      try {
+        final records = await _pb.collection('userStats').getFullList(
+          filter: 'userId = "$userId"',
+        );
+        if (records.isNotEmpty) {
+          statsRecord = records.first;
+        }
+      } catch (e) {
+        // Record doesn't exist yet
+      }
 
-      if (!doc.exists) {
+      if (statsRecord == null) {
         // Create new stats
-        await userStatsRef.set({
-          'currentStreak': 1,
-          'longestStreak': 1,
-          'lastActiveDate': FieldValue.serverTimestamp(),
-          'totalPoints': points,
-          'level': 1,
-          'badges': [],
-          'activityCounts': {activityType: 1},
-        });
+        final now = DateTime.now();
+        await _pb.collection('userStats').create(
+          body: {
+            'userId': userId,
+            'currentStreak': 1,
+            'longestStreak': 1,
+            'lastActiveDate': now.toIso8601String(),
+            'totalPoints': points,
+            'level': 1,
+            'badges': [],
+            'activityCounts': {activityType: 1},
+          },
+        );
       } else {
         // Update existing stats
-        final data = doc.data()!;
-        final lastActive = data['lastActiveDate'] != null
-            ? (data['lastActiveDate'] as Timestamp).toDate()
-            : null;
+        final data = statsRecord.data;
+        final lastActiveStr = data['lastActiveDate'] as String?;
+        final lastActive = lastActiveStr != null ? DateTime.parse(lastActiveStr) : null;
         final now = DateTime.now();
 
         int currentStreak = data['currentStreak'] ?? 0;
@@ -54,14 +73,17 @@ class GamificationService {
             Map<String, dynamic>.from(data['activityCounts'] ?? {});
         activityCounts[activityType] = (activityCounts[activityType] ?? 0) + 1;
 
-        await userStatsRef.update({
-          'currentStreak': currentStreak,
-          'longestStreak': longestStreak,
-          'lastActiveDate': FieldValue.serverTimestamp(),
-          'totalPoints': totalPoints,
-          'level': level,
-          'activityCounts': activityCounts,
-        });
+        await _pb.collection('userStats').update(
+          statsRecord.id,
+          body: {
+            'currentStreak': currentStreak,
+            'longestStreak': longestStreak,
+            'lastActiveDate': now.toIso8601String(),
+            'totalPoints': totalPoints,
+            'level': level,
+            'activityCounts': activityCounts,
+          },
+        );
       }
     } catch (e) {
       print('Failed to record activity: $e');
@@ -70,93 +92,83 @@ class GamificationService {
 
   // Get user stats
   Stream<UserStatsModel?> getUserStats(String userId) {
-    return _firestore
-        .collection('userStats')
-        .doc(userId)
-        .snapshots()
-        .map((doc) => doc.exists ? UserStatsModel.fromFirestore(doc) : null);
+    final streamKey = 'stats_$userId';
+
+    // Return existing stream if already active
+    if (_statsStreams.containsKey(streamKey)) {
+      return _statsStreams[streamKey]!.stream;
+    }
+
+    // Create new stream controller
+    final controller = StreamController<UserStatsModel?>.broadcast(
+      onCancel: () {
+        _pollingTimers[streamKey]?.cancel();
+        _pollingTimers.remove(streamKey);
+        _statsStreams.remove(streamKey);
+      },
+    );
+
+    _statsStreams[streamKey] = controller;
+
+    // Fetch and emit data periodically
+    void fetchData() async {
+      try {
+        final records = await _pb.collection('userStats').getFullList(
+          filter: 'userId = "$userId"',
+        );
+
+        if (!controller.isClosed) {
+          if (records.isNotEmpty) {
+            controller.add(UserStatsModel.fromPocketBase(records.first));
+          } else {
+            controller.add(null);
+          }
+        }
+      } catch (e) {
+        if (!controller.isClosed) {
+          controller.addError('Failed to fetch user stats: $e');
+        }
+      }
+    }
+
+    // Initial fetch
+    fetchData();
+
+    // Poll every 3 seconds
+    _pollingTimers[streamKey] = Timer.periodic(
+      const Duration(seconds: 3),
+      (_) => fetchData(),
+    );
+
+    return controller.stream;
   }
 
   // Get leaderboard
   Future<List<UserStatsModel>> getLeaderboard({int limit = 10}) async {
     try {
-      final snapshot = await _firestore
-          .collection('userStats')
-          .orderBy('totalPoints', descending: true)
-          .limit(limit)
-          .get();
+      final records = await _pb.collection('userStats').getList(
+        page: 1,
+        perPage: limit,
+        sort: '-totalPoints',
+      );
 
-      return snapshot.docs
-          .map((doc) => UserStatsModel.fromFirestore(doc))
+      return records.items
+          .map((record) => UserStatsModel.fromPocketBase(record))
           .toList();
     } catch (e) {
       return [];
     }
   }
-}
 
-class AttendanceService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
-  // Create attendance session
-  Future<String> createSession({
-    required String groupChatId,
-    required String sessionName,
-    required String createdBy,
-  }) async {
-    try {
-      final docRef = await _firestore.collection('attendance').add({
-        'groupChatId': groupChatId,
-        'sessionName': sessionName,
-        'startTime': FieldValue.serverTimestamp(),
-        'endTime': null,
-        'presentUserIds': [],
-        'lateUserIds': [],
-        'createdBy': createdBy,
-      });
-
-      return docRef.id;
-    } catch (e) {
-      throw 'Failed to create session: $e';
+  // Cleanup resources
+  void dispose() {
+    for (var timer in _pollingTimers.values) {
+      timer.cancel();
     }
-  }
-
-  // Mark attendance
-  Future<void> markAttendance({
-    required String sessionId,
-    required String userId,
-    bool isLate = false,
-  }) async {
-    try {
-      final field = isLate ? 'lateUserIds' : 'presentUserIds';
-      await _firestore.collection('attendance').doc(sessionId).update({
-        field: FieldValue.arrayUnion([userId]),
-      });
-    } catch (e) {
-      throw 'Failed to mark attendance: $e';
+    for (var controller in _statsStreams.values) {
+      controller.close();
     }
-  }
-
-  // End session
-  Future<void> endSession(String sessionId) async {
-    try {
-      await _firestore.collection('attendance').doc(sessionId).update({
-        'endTime': FieldValue.serverTimestamp(),
-      });
-    } catch (e) {
-      throw 'Failed to end session: $e';
-    }
-  }
-
-  // Get sessions
-  Stream<List<AttendanceModel>> getSessions(String groupChatId) {
-    return _firestore
-        .collection('attendance')
-        .where('groupChatId', isEqualTo: groupChatId)
-        .orderBy('startTime', descending: true)
-        .snapshots()
-        .map((snapshot) => snapshot.docs
-            .map((doc) => AttendanceModel.fromFirestore(doc))
-            .toList());
+    _pollingTimers.clear();
+    _statsStreams.clear();
   }
 }

@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+// Firestore removed - using PocketBase now
+// import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import '../../models/group_chat_model.dart';
 import '../../models/message_model.dart';
-import '../../models/user_model.dart';
+import '../../services/chat_service.dart';
 import '../../utils/theme.dart';
-import '../../utils/constants.dart';
 
 class SearchMessagesScreen extends StatefulWidget {
   final GroupChatModel groupChat;
@@ -21,7 +21,7 @@ class SearchMessagesScreen extends StatefulWidget {
 
 class _SearchMessagesScreenState extends State<SearchMessagesScreen> {
   final TextEditingController _searchController = TextEditingController();
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final ChatService _chatService = ChatService();
   List<MessageModel> _searchResults = [];
   bool _isSearching = false;
   bool _hasSearched = false;
@@ -47,19 +47,18 @@ class _SearchMessagesScreenState extends State<SearchMessagesScreen> {
     });
 
     try {
-      // Get all messages from this group chat
-      final messagesSnapshot = await _firestore
-          .collection(AppConstants.groupChatsCollection)
-          .doc(widget.groupChat.id)
-          .collection('messages')
-          .orderBy('timestamp', descending: true)
-          .limit(500) // Limit to last 500 messages for performance
-          .get();
+      // Get messages from PocketBase (first value from stream)
+      final messagesStream = _chatService.getMessages(
+        groupChatId: widget.groupChat.id,
+        limit: 500, // Limit to last 500 messages for performance
+      );
+
+      // Get first value from stream
+      final messages = await messagesStream.first;
 
       // Filter messages by search query
       final queryLower = query.toLowerCase();
-      final results = messagesSnapshot.docs
-          .map((doc) => MessageModel.fromFirestore(doc))
+      final results = messages
           .where((message) =>
               message.content.toLowerCase().contains(queryLower) ||
               message.senderName.toLowerCase().contains(queryLower))

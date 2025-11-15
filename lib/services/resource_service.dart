@@ -1,24 +1,67 @@
 import 'dart:io';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
+import 'package:pocketbase/pocketbase.dart';
+import 'package:http/http.dart' as http;
 import '../models/resource_model.dart';
+import 'pocketbase_service.dart';
+import 'dart:async';
 
 class ResourceService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseStorage _storage = FirebaseStorage.instance;
+  final PocketBase _pb = PocketBaseService().client;
+
+  // Store active subscriptions for cleanup
+  final Map<String, StreamController<List<ResourceModel>>> _resourceStreams = {};
+  final Map<String, Timer> _pollingTimers = {};
 
   // Get resources stream for a group chat
   Stream<List<ResourceModel>> getResources(String groupChatId) {
-    return _firestore
-        .collection('resources')
-        .where('groupChatId', isEqualTo: groupChatId)
-        .orderBy('uploadedAt', descending: true)
-        .snapshots()
-        .map((snapshot) {
-      return snapshot.docs
-          .map((doc) => ResourceModel.fromMap(doc.data(), doc.id))
-          .toList();
-    });
+    final streamKey = 'resources_$groupChatId';
+
+    // Return existing stream if already active
+    if (_resourceStreams.containsKey(streamKey)) {
+      return _resourceStreams[streamKey]!.stream;
+    }
+
+    // Create new stream controller
+    final controller = StreamController<List<ResourceModel>>.broadcast(
+      onCancel: () {
+        _pollingTimers[streamKey]?.cancel();
+        _pollingTimers.remove(streamKey);
+        _resourceStreams.remove(streamKey);
+      },
+    );
+
+    _resourceStreams[streamKey] = controller;
+
+    // Fetch and emit data periodically
+    void fetchData() async {
+      try {
+        final records = await _pb.collection('resources').getFullList(
+          filter: 'groupChatId = "$groupChatId"',
+          sort: '-uploadedAt',
+        );
+
+        if (!controller.isClosed) {
+          controller.add(
+            records.map((record) => ResourceModel.fromPocketBase(record)).toList()
+          );
+        }
+      } catch (e) {
+        if (!controller.isClosed) {
+          controller.addError('Failed to fetch resources: $e');
+        }
+      }
+    }
+
+    // Initial fetch
+    fetchData();
+
+    // Poll every 3 seconds
+    _pollingTimers[streamKey] = Timer.periodic(
+      const Duration(seconds: 3),
+      (_) => fetchData(),
+    );
+
+    return controller.stream;
   }
 
   // Upload a resource file
@@ -33,27 +76,34 @@ class ResourceService {
       // Get file size
       final fileSize = await file.length();
       final fileType = fileName.split('.').last.toLowerCase();
+      final now = DateTime.now();
 
-      // Upload file to Firebase Storage
-      final storageRef = _storage.ref().child(
-          'resources/$groupChatId/${DateTime.now().millisecondsSinceEpoch}_$fileName');
+      // Create multipart file for upload
+      final multipartFile = await http.MultipartFile.fromPath(
+        'file',
+        file.path,
+        filename: fileName,
+      );
 
-      final uploadTask = await storageRef.putFile(file);
-      final fileUrl = await uploadTask.ref.getDownloadURL();
-
-      // Create resource document in Firestore
-      final docRef = await _firestore.collection('resources').add({
+      // Create resource record with file
+      final formData = <String, dynamic>{
         'groupChatId': groupChatId,
         'fileName': fileName,
-        'fileUrl': fileUrl,
         'fileType': fileType,
         'fileSize': fileSize,
         'uploadedBy': uploadedBy,
         'uploaderName': uploaderName,
-        'uploadedAt': FieldValue.serverTimestamp(),
-      });
+        'uploadedAt': now.toIso8601String(),
+      };
 
-      return docRef.id;
+      final record = await _pb.collection('resources').create(
+        body: formData,
+        files: [multipartFile],
+      );
+
+      return record.id;
+    } on ClientException catch (e) {
+      throw Exception('Failed to upload resource: ${e.response['message'] ?? e.toString()}');
     } catch (e) {
       throw Exception('Failed to upload resource: $e');
     }
@@ -62,11 +112,13 @@ class ResourceService {
   // Get a single resource
   Future<ResourceModel?> getResource(String resourceId) async {
     try {
-      final doc = await _firestore.collection('resources').doc(resourceId).get();
-
-      if (!doc.exists) return null;
-
-      return ResourceModel.fromMap(doc.data()!, doc.id);
+      final record = await _pb.collection('resources').getOne(resourceId);
+      return ResourceModel.fromPocketBase(record);
+    } on ClientException catch (e) {
+      if (e.statusCode == 404) {
+        return null;
+      }
+      throw Exception('Failed to get resource: ${e.response['message'] ?? e.toString()}');
     } catch (e) {
       throw Exception('Failed to get resource: $e');
     }
@@ -75,21 +127,10 @@ class ResourceService {
   // Delete a resource
   Future<void> deleteResource(String resourceId) async {
     try {
-      // Get resource to get the file URL
-      final resource = await getResource(resourceId);
-      if (resource == null) return;
-
-      // Delete file from Storage
-      try {
-        final fileRef = _storage.refFromURL(resource.fileUrl);
-        await fileRef.delete();
-      } catch (e) {
-        // Continue even if storage deletion fails
-        print('Failed to delete file from storage: $e');
-      }
-
-      // Delete document from Firestore
-      await _firestore.collection('resources').doc(resourceId).delete();
+      // PocketBase automatically deletes associated files when deleting a record
+      await _pb.collection('resources').delete(resourceId);
+    } on ClientException catch (e) {
+      throw Exception('Failed to delete resource: ${e.response['message'] ?? e.toString()}');
     } catch (e) {
       throw Exception('Failed to delete resource: $e');
     }
@@ -101,16 +142,16 @@ class ResourceService {
     required String fileType,
   }) async {
     try {
-      final snapshot = await _firestore
-          .collection('resources')
-          .where('groupChatId', isEqualTo: groupChatId)
-          .where('fileType', isEqualTo: fileType)
-          .orderBy('uploadedAt', descending: true)
-          .get();
+      final records = await _pb.collection('resources').getFullList(
+        filter: 'groupChatId = "$groupChatId" && fileType = "$fileType"',
+        sort: '-uploadedAt',
+      );
 
-      return snapshot.docs
-          .map((doc) => ResourceModel.fromMap(doc.data(), doc.id))
+      return records
+          .map((record) => ResourceModel.fromPocketBase(record))
           .toList();
+    } on ClientException catch (e) {
+      throw Exception('Failed to get resources by type: ${e.response['message'] ?? e.toString()}');
     } catch (e) {
       throw Exception('Failed to get resources by type: $e');
     }
@@ -122,14 +163,13 @@ class ResourceService {
     required String query,
   }) async {
     try {
-      final snapshot = await _firestore
-          .collection('resources')
-          .where('groupChatId', isEqualTo: groupChatId)
-          .orderBy('uploadedAt', descending: true)
-          .get();
+      final records = await _pb.collection('resources').getFullList(
+        filter: 'groupChatId = "$groupChatId"',
+        sort: '-uploadedAt',
+      );
 
-      final resources = snapshot.docs
-          .map((doc) => ResourceModel.fromMap(doc.data(), doc.id))
+      final resources = records
+          .map((record) => ResourceModel.fromPocketBase(record))
           .toList();
 
       // Filter by search query
@@ -137,6 +177,8 @@ class ResourceService {
           .where((resource) =>
               resource.fileName.toLowerCase().contains(query.toLowerCase()))
           .toList();
+    } on ClientException catch (e) {
+      throw Exception('Failed to search resources: ${e.response['message'] ?? e.toString()}');
     } catch (e) {
       throw Exception('Failed to search resources: $e');
     }
@@ -145,20 +187,33 @@ class ResourceService {
   // Get total storage used by group
   Future<int> getTotalStorageUsed(String groupChatId) async {
     try {
-      final snapshot = await _firestore
-          .collection('resources')
-          .where('groupChatId', isEqualTo: groupChatId)
-          .get();
+      final records = await _pb.collection('resources').getFullList(
+        filter: 'groupChatId = "$groupChatId"',
+      );
 
       int totalSize = 0;
-      for (var doc in snapshot.docs) {
-        final resource = ResourceModel.fromMap(doc.data(), doc.id);
+      for (var record in records) {
+        final resource = ResourceModel.fromPocketBase(record);
         totalSize += resource.fileSize;
       }
 
       return totalSize;
+    } on ClientException catch (e) {
+      throw Exception('Failed to get total storage: ${e.response['message'] ?? e.toString()}');
     } catch (e) {
       throw Exception('Failed to get total storage: $e');
     }
+  }
+
+  // Cleanup resources
+  void dispose() {
+    for (var timer in _pollingTimers.values) {
+      timer.cancel();
+    }
+    for (var controller in _resourceStreams.values) {
+      controller.close();
+    }
+    _pollingTimers.clear();
+    _resourceStreams.clear();
   }
 }
