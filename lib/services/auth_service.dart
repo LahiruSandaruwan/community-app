@@ -41,6 +41,7 @@ class AuthService {
         lastSeen: DateTime.now(),
         isOnline: true,
         communityIds: [],
+        mutedGroupChatIds: [],
       );
 
       await _firestore
