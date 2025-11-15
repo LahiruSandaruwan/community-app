@@ -76,8 +76,10 @@ class AuthService {
           .doc(userCredential.user!.uid)
           .get();
 
-      if (!userDoc.exists) {
-        throw 'User data not found';
+      if (!userDoc.exists || userDoc.data() == null) {
+        // User exists in Auth but not in Firestore - sign them out and show error
+        await _auth.signOut();
+        throw 'User profile not found. Please contact support or sign up again.';
       }
 
       UserModel user = UserModel.fromFirestore(userDoc);
