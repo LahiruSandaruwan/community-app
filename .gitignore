@@ -62,3 +62,6 @@ coverage/
 
 # Local configuration
 local.properties
+# PocketBase runtime files
+pocketbase/pb_data/*.db-shm
+pocketbase/pb_data/*.db-wal
