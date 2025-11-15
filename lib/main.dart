@@ -18,9 +18,11 @@ import 'screens/home_screen.dart';
 import 'utils/theme.dart';
 
 // Background message handler for FCM
+// Note: Firebase is already initialized in main(), so no need to initialize here
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  await Firebase.initializeApp();
   print('Handling background message: ${message.messageId}');
+  // Handle the background notification here
+  // You can update local storage, show local notification, etc.
 }
 
 void main() async {
