@@ -2,10 +2,13 @@ import 'package:pocketbase/pocketbase.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user_model.dart';
 import '../utils/constants.dart';
+import '../utils/rate_limiter.dart';
+import '../utils/logger.dart';
 import 'pocketbase_service.dart';
 
 class PocketBaseAuthService {
   final PocketBase _pb = PocketBaseService().client;
+  final Logger _logger = Logger.forClass(PocketBaseAuthService);
 
   // Get current user
   RecordModel? get currentUser => _pb.authStore.record;
@@ -31,7 +34,15 @@ class PocketBaseAuthService {
     required String role,
     String? phoneNumber,
   }) async {
+    // Apply rate limiting
+    final rateLimitError = RateLimiters.auth.checkLimit(email.toLowerCase());
+    if (rateLimitError != null) {
+      _logger.warning('Sign up rate limit exceeded for email: $email');
+      throw rateLimitError;
+    }
+
     try {
+      _logger.info('Attempting sign up for email: $email');
       // Create user in PocketBase
       final userData = <String, dynamic>{
         'email': email,
@@ -48,9 +59,18 @@ class PocketBaseAuthService {
         'mutedGroupChatIds': [],
       };
 
+      // Debug log to trace role value
+      _logger.debug('Creating user with data: name=$name, email=$email, role=$role');
+      _logger.debug('Full userData payload: $userData');
+
       final record = await _pb.collection(AppConstants.usersCollection).create(
             body: userData,
           );
+
+      // Debug log to verify what PocketBase returned
+      _logger.debug('PocketBase created record ID: ${record.id}');
+      _logger.debug('Record data from PocketBase: ${record.data}');
+      _logger.debug('Record role field: ${record.data['role']}');
 
       // Authenticate the user after creation
       await _pb.collection(AppConstants.usersCollection).authWithPassword(
@@ -60,14 +80,21 @@ class PocketBaseAuthService {
 
       // Convert to UserModel
       final user = UserModel.fromPocketBase(record);
+      _logger.debug('UserModel created with role: ${user.role}');
 
       // Save user data locally
       await _saveUserLocally(user);
 
+      // Reset rate limit on successful sign up
+      RateLimiters.auth.reset(email.toLowerCase());
+      _logger.info('Sign up successful for email: $email');
+
       return user;
     } on ClientException catch (e) {
+      _logger.error('Sign up failed for email: $email', error: e);
       throw _handlePocketBaseException(e);
     } catch (e) {
+      _logger.error('Sign up error for email: $email', error: e);
       throw 'An error occurred during sign up: $e';
     }
   }
@@ -77,7 +104,15 @@ class PocketBaseAuthService {
     required String email,
     required String password,
   }) async {
+    // Apply rate limiting
+    final rateLimitError = RateLimiters.auth.checkLimit(email.toLowerCase());
+    if (rateLimitError != null) {
+      _logger.warning('Sign in rate limit exceeded for email: $email');
+      throw rateLimitError;
+    }
+
     try {
+      _logger.info('Attempting sign in for email: $email');
       // Authenticate with PocketBase
       final authData = await _pb
           .collection(AppConstants.usersCollection)
@@ -96,8 +131,13 @@ class PocketBaseAuthService {
       // Save user data locally
       await _saveUserLocally(user);
 
+      // Reset rate limit on successful sign in
+      RateLimiters.auth.reset(email.toLowerCase());
+      _logger.info('Sign in successful for email: $email');
+
       return user;
     } on ClientException catch (e) {
+      _logger.error('Sign in failed for email: $email', error: e);
       throw _handlePocketBaseException(e);
     } catch (e) {
       throw 'An error occurred during sign in: $e';

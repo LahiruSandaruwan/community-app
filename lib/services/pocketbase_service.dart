@@ -1,4 +1,5 @@
 import 'package:pocketbase/pocketbase.dart';
+import '../config/env_config.dart';
 
 /// Base PocketBase service that provides the PocketBase client instance
 /// to all other services in the app
@@ -6,8 +7,8 @@ class PocketBaseService {
   static final PocketBaseService _instance = PocketBaseService._internal();
   late final PocketBase _pb;
 
-  // PocketBase server URL - update this for production deployment
-  static const String _baseUrl = 'http://127.0.0.1:8090';
+  // PocketBase server URL - loaded from environment configuration
+  static String get _baseUrl => EnvConfig.pocketbaseUrl;
 
   factory PocketBaseService() {
     return _instance;

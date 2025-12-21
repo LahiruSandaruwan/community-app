@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import '../models/user_model.dart';
 import '../services/pocketbase_auth_service.dart';
+import '../utils/logger.dart';
 
 class AuthProvider with ChangeNotifier {
   final PocketBaseAuthService _authService = PocketBaseAuthService();
+  final Logger _logger = Logger.forClass(AuthProvider);
 
   UserModel? _currentUser;
   bool _isLoading = false;
@@ -23,7 +25,7 @@ class AuthProvider with ChangeNotifier {
       }
     } catch (e) {
       // Handle PocketBase initialization errors gracefully
-      print('Error initializing auth: $e');
+      _logger.error('Error initializing auth', error: e);
       _currentUser = null;
       notifyListeners();
     }

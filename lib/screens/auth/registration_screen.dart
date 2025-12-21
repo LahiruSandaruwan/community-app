@@ -37,6 +37,11 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
 
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
 
+    // Debug log to confirm role selection
+    print('DEBUG: Registration screen - Selected role: $_selectedRole');
+    print('DEBUG: Registration screen - Student constant: ${AppConstants.roleStudent}');
+    print('DEBUG: Registration screen - Tutor constant: ${AppConstants.roleTutor}');
+
     bool success = await authProvider.signUp(
       email: _emailController.text.trim(),
       password: _passwordController.text,
