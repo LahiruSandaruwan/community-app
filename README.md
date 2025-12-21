@@ -48,32 +48,32 @@ A Flutter-based mobile application designed for tutors to create and manage educ
 - **Framework:** Flutter 3.0+
 - **State Management:** Provider
 - **Backend Services:**
-  - Firebase Authentication (FREE tier)
-  - Cloud Firestore (FREE tier - 50K reads/day, 20K writes/day)
-  - Firebase Storage (FREE tier - 5GB)
-  - Firebase Cloud Messaging (FREE tier)
+  - **PocketBase** - Self-hosted backend (Authentication, Database, File Storage)
+  - Firebase Crashlytics & Analytics (Optional, for monitoring)
 - **Architecture:** Clean Architecture with separation of concerns
   - Models
   - Services
   - Providers (State Management)
   - Screens (UI)
   - Widgets (Reusable components)
+- **Database:** PocketBase with automated migrations and seeders
+- **Infrastructure:** Environment-based configuration, structured logging, rate limiting
 
 ## 📋 Prerequisites
 
 - Flutter SDK (3.0.0 or higher)
 - Dart SDK (3.0.0 or higher)
 - Android Studio / VS Code with Flutter extensions
-- Firebase account (free tier)
 - Android SDK (for Android development)
 - Xcode (for iOS development - optional)
+- **PocketBase** (included in `pocketbase/` directory)
 
 ## 🚀 Getting Started
 
 ### 1. Clone the Repository
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/LahiruSandaruwan/community-app.git
 cd community-app
 ```
 
@@ -83,7 +83,45 @@ cd community-app
 flutter pub get
 ```
 
-### 3. Firebase Setup
+### 3. PocketBase Setup (Automated!)
+
+#### Quick Start (Recommended)
+
+```bash
+# 1. Start PocketBase
+cd pocketbase
+./pocketbase serve
+
+# 2. Create admin account (first-time only)
+# Open browser: http://127.0.0.1:8090/_/
+# Create admin (e.g., admin@local.com / password123)
+
+# 3. Run automated migrations (creates all database schema)
+./migrate.sh
+
+# 4. Seed test data (optional - creates sample users & communities)
+./seed.sh
+```
+
+**That's it!** Your database is fully configured with:
+- ✅ All collections created (users, communities, messages, etc.)
+- ✅ Custom user fields (role, phoneNumber, etc.)
+- ✅ Sample test data (3 tutors, 8 students, 3 communities)
+
+#### What Gets Created
+
+**Test Users:**
+- Tutors: `tutor1@educonnect.com` / `password123`
+- Students: `student1@educonnect.com` / `password123`
+
+**Test Communities:**
+- Mathematics 101 (Code: `MATH101`)
+- Physics Advanced (Code: `PHYS201`)
+- Coding Bootcamp (Code: `CODE301`)
+
+📖 **Detailed Guide:** See [DATABASE_MIGRATION_GUIDE.md](DATABASE_MIGRATION_GUIDE.md)
+
+### 3. Firebase Setup (Optional - for Analytics/Crashlytics)
 
 #### A. Create a Firebase Project
 
