@@ -141,9 +141,13 @@ class ChatService {
           body: {'readBy': readBy},
         );
       }
+    } on ClientException catch (e) {
+      if (e.statusCode != 404) {
+        throw 'Failed to mark message as read: ${e.response['message'] ?? e.toString()}';
+      }
+      // Ignore 404 - message may have been deleted
     } catch (e) {
-      // Silently fail - not critical
-      print('Failed to mark message as read: $e');
+      throw 'Failed to mark message as read: $e';
     }
   }
 
@@ -159,16 +163,21 @@ class ChatService {
       );
 
       // Update each message that hasn't been read by this user
+      List<String> failedMessageIds = [];
       for (var messageRecord in messages) {
         final readBy = List<String>.from(messageRecord.data['readBy'] ?? []);
 
         if (!readBy.contains(userId)) {
           readBy.add(userId);
 
-          await _pb.collection(AppConstants.messagesCollection).update(
-            messageRecord.id,
-            body: {'readBy': readBy},
-          );
+          try {
+            await _pb.collection(AppConstants.messagesCollection).update(
+              messageRecord.id,
+              body: {'readBy': readBy},
+            );
+          } catch (e) {
+            failedMessageIds.add(messageRecord.id);
+          }
         }
       }
 
@@ -182,12 +191,23 @@ class ChatService {
           groupChatId,
           body: {'unreadCounts': unreadCounts},
         );
+      } on ClientException catch (e) {
+        if (e.statusCode != 404) {
+          throw 'Failed to reset unread count: ${e.response['message'] ?? e.toString()}';
+        }
+        // Ignore 404 - group chat may have been deleted
       } catch (e) {
-        // Silently fail if group chat doesn't exist or unreadCounts field is missing
-        print('Failed to reset unread count: $e');
+        throw 'Failed to reset unread count: $e';
       }
+
+      if (failedMessageIds.isNotEmpty) {
+        throw 'Failed to mark ${failedMessageIds.length} message(s) as read';
+      }
+    } on ClientException catch (e) {
+      throw 'Failed to mark all messages as read: ${e.response['message'] ?? e.toString()}';
     } catch (e) {
-      print('Failed to mark all messages as read: $e');
+      if (e is String) rethrow;
+      throw 'Failed to mark all messages as read: $e';
     }
   }
 
@@ -330,9 +350,10 @@ class ChatService {
           // Ignore if not found
         }
       }
+    } on ClientException catch (e) {
+      throw 'Failed to set typing indicator: ${e.response['message'] ?? e.toString()}';
     } catch (e) {
-      // Silently fail - not critical
-      print('Failed to set typing indicator: $e');
+      throw 'Failed to set typing indicator: $e';
     }
   }
 
@@ -413,8 +434,10 @@ class ChatService {
       }
 
       return unreadCount;
+    } on ClientException catch (e) {
+      throw 'Failed to get unread count: ${e.response['message'] ?? e.toString()}';
     } catch (e) {
-      return 0;
+      throw 'Failed to get unread count: $e';
     }
   }
 
@@ -435,8 +458,13 @@ class ChatService {
           'lastMessageSenderId': lastMessageSenderId,
         },
       );
+    } on ClientException catch (e) {
+      if (e.statusCode != 404) {
+        throw 'Failed to update last message: ${e.response['message'] ?? e.toString()}';
+      }
+      // Ignore 404 - group chat may have been deleted
     } catch (e) {
-      print('Failed to update last message: $e');
+      throw 'Failed to update last message: $e';
     }
   }
 

@@ -117,13 +117,22 @@ class CommunityService {
     List<CommunityModel> communities = await _fetchUserCommunities(userId);
     yield communities;
 
+    // Track consecutive errors for backoff
+    int consecutiveErrors = 0;
+
     // Subscribe to real-time updates
     await for (final _ in Stream.periodic(const Duration(seconds: 2))) {
       try {
         communities = await _fetchUserCommunities(userId);
         yield communities;
+        consecutiveErrors = 0; // Reset on success
       } catch (e) {
-        // Continue with previous data on error
+        consecutiveErrors++;
+        // After 3 consecutive errors, throw to notify the UI
+        if (consecutiveErrors >= 3) {
+          throw 'Failed to sync communities after multiple attempts. Please check your connection.';
+        }
+        // Continue with previous data on first few errors
         yield communities;
       }
     }
@@ -224,13 +233,22 @@ class CommunityService {
     List<GroupChatModel> groupChats = await _fetchCommunityGroupChats(communityId);
     yield groupChats;
 
+    // Track consecutive errors for backoff
+    int consecutiveErrors = 0;
+
     // Subscribe to real-time updates
     await for (final _ in Stream.periodic(const Duration(seconds: 2))) {
       try {
         groupChats = await _fetchCommunityGroupChats(communityId);
         yield groupChats;
+        consecutiveErrors = 0; // Reset on success
       } catch (e) {
-        // Continue with previous data on error
+        consecutiveErrors++;
+        // After 3 consecutive errors, throw to notify the UI
+        if (consecutiveErrors >= 3) {
+          throw 'Failed to sync group chats after multiple attempts. Please check your connection.';
+        }
+        // Continue with previous data on first few errors
         yield groupChats;
       }
     }
@@ -258,13 +276,22 @@ class CommunityService {
     List<GroupChatModel> groupChats = await _fetchUserGroupChats(userId);
     yield groupChats;
 
+    // Track consecutive errors for backoff
+    int consecutiveErrors = 0;
+
     // Subscribe to real-time updates
     await for (final _ in Stream.periodic(const Duration(seconds: 2))) {
       try {
         groupChats = await _fetchUserGroupChats(userId);
         yield groupChats;
+        consecutiveErrors = 0; // Reset on success
       } catch (e) {
-        // Continue with previous data on error
+        consecutiveErrors++;
+        // After 3 consecutive errors, throw to notify the UI
+        if (consecutiveErrors >= 3) {
+          throw 'Failed to sync group chats after multiple attempts. Please check your connection.';
+        }
+        // Continue with previous data on first few errors
         yield groupChats;
       }
     }
@@ -443,6 +470,11 @@ class CommunityService {
           body: {'communityIds': communityIds},
         );
       }
+    } on ClientException catch (e) {
+      if (e.statusCode == 404) {
+        throw 'User not found. Cannot add community membership.';
+      }
+      throw 'Failed to add community to user: ${e.response['message'] ?? e.toString()}';
     } catch (e) {
       throw 'Failed to add community to user: $e';
     }
@@ -464,6 +496,12 @@ class CommunityService {
         userId,
         body: {'communityIds': communityIds},
       );
+    } on ClientException catch (e) {
+      if (e.statusCode == 404) {
+        // User already deleted, nothing to update
+        return;
+      }
+      throw 'Failed to remove community from user: ${e.response['message'] ?? e.toString()}';
     } catch (e) {
       throw 'Failed to remove community from user: $e';
     }
@@ -487,6 +525,11 @@ class CommunityService {
           body: {'memberIds': memberIds},
         );
       }
+    } on ClientException catch (e) {
+      if (e.statusCode == 404) {
+        throw 'Group chat not found. Cannot add member.';
+      }
+      throw 'Failed to add member to group chat: ${e.response['message'] ?? e.toString()}';
     } catch (e) {
       throw 'Failed to add member to group chat: $e';
     }
@@ -508,6 +551,12 @@ class CommunityService {
         groupChatId,
         body: {'memberIds': memberIds},
       );
+    } on ClientException catch (e) {
+      if (e.statusCode == 404) {
+        // Group chat already deleted, nothing to update
+        return;
+      }
+      throw 'Failed to remove member from group chat: ${e.response['message'] ?? e.toString()}';
     } catch (e) {
       throw 'Failed to remove member from group chat: $e';
     }

@@ -85,8 +85,10 @@ class GamificationService {
           },
         );
       }
+    } on ClientException catch (e) {
+      throw 'Failed to record activity: ${e.response['message'] ?? e.toString()}';
     } catch (e) {
-      print('Failed to record activity: $e');
+      throw 'Failed to record activity: $e';
     }
   }
 
@@ -155,8 +157,10 @@ class GamificationService {
       return records.items
           .map((record) => UserStatsModel.fromPocketBase(record))
           .toList();
+    } on ClientException catch (e) {
+      throw 'Failed to get leaderboard: ${e.response['message'] ?? e.toString()}';
     } catch (e) {
-      return [];
+      throw 'Failed to get leaderboard: $e';
     }
   }
 

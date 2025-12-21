@@ -111,8 +111,13 @@ class StorageService {
         // For other collections (users, etc.), we don't delete the record
         // as it may contain other important data
       }
+    } on ClientException catch (e) {
+      if (e.statusCode != 404) {
+        throw 'Failed to delete file: ${e.response['message'] ?? e.toString()}';
+      }
+      // Ignore 404 - file already deleted
     } catch (e) {
-      print('Failed to delete file: $e');
+      throw 'Failed to delete file: $e';
     }
   }
 

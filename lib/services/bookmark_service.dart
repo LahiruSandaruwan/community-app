@@ -70,8 +70,10 @@ class BookmarkService {
       );
 
       return records.isNotEmpty;
+    } on ClientException catch (e) {
+      throw 'Failed to check bookmark status: ${e.response['message'] ?? e.toString()}';
     } catch (e) {
-      return false;
+      throw 'Failed to check bookmark status: $e';
     }
   }
 
@@ -125,8 +127,18 @@ class BookmarkService {
               'bookmarkedAt': bookmarkRecord.data['bookmarkedAt'],
               'note': bookmarkRecord.data['note'],
             });
+          } on ClientException catch (e) {
+            // Message may have been deleted - skip it but log warning
+            if (e.statusCode != 404) {
+              if (!controller.isClosed) {
+                controller.addError('Failed to fetch bookmarked message $messageId: ${e.response['message'] ?? e.toString()}');
+              }
+            }
+            // For 404, the message was deleted - silently skip
           } catch (e) {
-            print('Failed to fetch bookmarked message: $e');
+            if (!controller.isClosed) {
+              controller.addError('Failed to fetch bookmarked message $messageId: $e');
+            }
           }
         }
 

@@ -172,9 +172,13 @@ class PocketBaseAuthService {
           'lastSeen': DateTime.now().toIso8601String(),
         },
       );
+    } on ClientException catch (e) {
+      if (e.statusCode != 404) {
+        throw 'Failed to update online status: ${e.response['message'] ?? e.toString()}';
+      }
+      // Ignore 404 - user may have been deleted
     } catch (e) {
-      // Silently fail - not critical
-      print('Failed to update online status: $e');
+      throw 'Failed to update online status: $e';
     }
   }
 
@@ -188,8 +192,13 @@ class PocketBaseAuthService {
 
       SharedPreferences prefs = await SharedPreferences.getInstance();
       await prefs.setString(AppConstants.keyFcmToken, fcmToken);
+    } on ClientException catch (e) {
+      if (e.statusCode != 404) {
+        throw 'Failed to update FCM token: ${e.response['message'] ?? e.toString()}. Push notifications may not work.';
+      }
+      // Ignore 404 - user may have been deleted
     } catch (e) {
-      print('Failed to update FCM token: $e');
+      throw 'Failed to update FCM token: $e. Push notifications may not work.';
     }
   }
 
